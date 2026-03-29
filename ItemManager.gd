@@ -1,45 +1,34 @@
 extends Node
 
-# --- БАЗА ДАННЫХ ПРЕДМЕТОВ ---
 var items_db = {
-    1: {"name": "Красное зелье", "texture": "res://Assets/Items/potion_red.png"},
-    2: {"name": "Зеленое зелье", "texture": "res://Assets/Items/potion_green.png"},
-    3: {"name": "Синее зелье",   "texture": "res://Assets/Items/potion_blue.png"},
-    4: {"name": "Розовое зелье", "texture": "res://Assets/Items/potion_pink.png"},
-    5: {"name": "Красное перо",  "texture": "res://Assets/Items/feather_red.png"},
-    6: {"name": "Синее перо",    "texture": "res://Assets/Items/feather_blue.png"},
-    7: {"name": "Книги",         "texture": "res://Assets/Items/books.png"}
+	1: {"name": "Красное зелье", "texture": "res://Assets/Items/potion_red.png"},
+	2: {"name": "Зеленое зелье", "texture": "res://Assets/Items/potion_green.png"},
+	3: {"name": "Синее зелье",   "texture": "res://Assets/Items/potion_blue.png"},
+	4: {"name": "Розовое зелье", "texture": "res://Assets/Items/potion_pink.png"},
+	5: {"name": "Красное перо",  "texture": "res://Assets/Items/feather_red.png"},
+	6: {"name": "Синее перо",    "texture": "res://Assets/Items/feather_blue.png"},
+	7: {"name": "Книги",         "texture": "res://Assets/Items/books.png"}
 }
 
-var current_order = [] # Список текущего заказа (5 штук)
+var current_order = []
 
 func _ready():
-    check_resources()
+	check_resources()
 
 func check_resources():
-    print("--- ПРОВЕРКА РЕСУРСОВ ---")
-    var error_found = false
-    for id in items_db:
-        var path = items_db[id]["texture"]
-        if not FileAccess.file_exists(path):
-            print("!!! ОШИБКА: Файл НЕ найден: ", path)
-            error_found = true
-        else:
-            print("OK: ", path)
-    
-    if not error_found:
-        print("ВСЕ ФАЙЛЫ НА МЕСТЕ!")
-    print("-------------------------")
+	print("--- ПРОВЕРКА РЕСУРСОВ ---")
+	for id in items_db:
+		var path = items_db[id]["texture"]
+		if not FileAccess.file_exists(path):
+			print("!!! ОШИБКА: Файл НЕ найден: ", path)
+		else:
+			print("OK: ", path)
 
 func generate_new_order():
-    current_order.clear()
-    var all_ids = items_db.keys()
-    all_ids.shuffle()
-    
-    for i in range(5):
-        current_order.append({
-            "id": all_ids[i],
-            "found": false
-        })
-    
-    print("НОВЫЙ ЗАКАЗ СГЕНЕРИРОВАН: ", current_order)
+	current_order.clear()
+	var all_ids = items_db.keys()
+	all_ids.shuffle()
+	
+	for i in range(5):
+		current_order.append({"id": all_ids[i], "found": false})
+	print("НОВЫЙ ЗАКАЗ СГЕНЕРИРОВАН")

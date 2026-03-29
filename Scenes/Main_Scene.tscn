@@ -1,245 +1,85 @@
-[gd_scene format=3 uid="uid://v0m43w5h3y5n"]
+extends Node3D
 
-[ext_resource type="Script" uid="uid://d0nwl5dfkm28x" path="res://Scenes/main_scene.gd" id="1_06phl"]
-[ext_resource type="PackedScene" uid="uid://8wt0ks3gelni" path="res://Scenes/Cabinet.tscn" id="1_cabinet"]
-[ext_resource type="Texture2D" uid="uid://c0enkvr76li6n" path="res://Assets/2D/BG_Gameplay.png" id="2_4xruw"]
-[ext_resource type="Texture2D" uid="uid://ykv7lx6q61kv" path="res://Assets/2D/Start_Button.png" id="2_4y1r4"]
-[ext_resource type="FontFile" uid="uid://crl2jbvqyt7jm" path="res://Fonts/Comfortaa-Bold.ttf" id="2_6bry8"]
-[ext_resource type="Environment" uid="uid://cbntsyeky6pkj" path="res://my_env.tres" id="3_5p0eq"]
-[ext_resource type="Script" uid="uid://dut6a60a0h7i4" path="res://Scenes/order_pop_up.gd" id="3_ibde2"]
-[ext_resource type="PackedScene" uid="uid://q7m4xv1o6ted" path="res://item_card.tscn" id="4_0k7nw"]
-[ext_resource type="Texture2D" uid="uid://dc66gu7d3mxe" path="res://Assets/2D/Back.png" id="4_7h23t"]
-[ext_resource type="Texture2D" uid="uid://bbvo82e2lqwdp" path="res://Assets/2D/Letter.png" id="5_06phl"]
-[ext_resource type="Texture2D" uid="uid://bn060pxm84m5p" path="res://Assets/2D/Front.png" id="6_s7evf"]
-[ext_resource type="Texture2D" uid="uid://dx8cho3u0k5o2" path="res://Assets/2D/Start_Button_Pressed.png" id="8_s7evf"]
+@onready var order_popup = $CanvasLayer/Order_PopUp
+@onready var env_back = $CanvasLayer/Order_PopUp/EnvelopeBack
+@onready var env_front = $CanvasLayer/Order_PopUp/EnvelopeFront
+@onready var letter = $CanvasLayer/Order_PopUp/LetterContainer
+@onready var start_button = $CanvasLayer/Start_Button
+@onready var ready_button = $CanvasLayer/Ready_Button
+@onready var timer_label = $CanvasLayer/Order_PopUp/LetterContainer/LetterPaper/Timer
 
-[sub_resource type="StyleBoxTexture" id="StyleBoxTexture_5p0eq"]
-texture = ExtResource("2_4y1r4")
+@export var cabinet: Node3D
+@export var total_time: float = 10.0
 
-[sub_resource type="StyleBoxTexture" id="StyleBoxTexture_ibde2"]
-texture = ExtResource("8_s7evf")
+var time_left: float
+var is_timer_active: bool = false
+var is_game_started: bool = false
 
-[sub_resource type="StyleBoxTexture" id="StyleBoxTexture_np8lt"]
-texture = ExtResource("2_4y1r4")
+func _ready():
+	start_button.pressed.connect(_on_start_pressed)
+	ready_button.pressed.connect(_on_ready_pressed)
+	_reset_ui()
 
-[sub_resource type="StyleBoxTexture" id="StyleBoxTexture_s7evf"]
-texture = ExtResource("8_s7evf")
+func _reset_ui():
+	ready_button.modulate.a = 0.0
+	ready_button.hide()
+	env_back.modulate.a = 0.0
+	env_front.modulate.a = 0.0
+	letter.modulate.a = 0.0
+	if cabinet: cabinet.hide()
 
-[sub_resource type="StyleBoxTexture" id="StyleBoxTexture_0k7nw"]
-texture = ExtResource("2_4y1r4")
+func _process(delta):
+	if is_timer_active and time_left > 0:
+		time_left -= delta
+		timer_label.text = str(ceil(time_left)) + "s"
+		if time_left <= 0: _on_timer_timeout()
 
-[node name="MainScene" type="Node3D" unique_id=218363794 node_paths=PackedStringArray("cabinet")]
-script = ExtResource("1_06phl")
-cabinet = NodePath("Cabinet")
-total_time = 8.0
-env_intro_fade = 0.1
-env_intro_end_y = 1700.0
-env_intro_duration = 0.7
-env_outro_fade = 0.0
-env_outro_duration = 1.0
-env_outro_ease = 1
-let_intro_delay = 0.1
-let_intro_start_y = -1000.0
-let_intro_end_y = -1200.0
-let_intro_start_scale_y = 0.3
-let_intro_duration = 0.3
-let_intro_trans = 1
-let_intro_ease = 2
-let_outro_fade = 0.0
-let_outro_end_y = 2000.0
-let_outro_end_scale_y = 0.3
-let_outro_duration = 1.0
-let_outro_trans = 1
-let_outro_ease = 2
+func _on_start_pressed():
+	start_button.hide()
+	ItemManager.generate_new_order()
+	order_popup.fill_order_icons()
+	
+	time_left = total_time
+	is_game_started = false
+	_animate_intro()
 
-[node name="CanvasLayer" type="CanvasLayer" parent="." unique_id=841755572]
-layer = -1
+func _animate_intro():
+	order_popup.position.y = 2300
+	letter.position.y = -2000
+	letter.scale.y = 0.1
+	
+	var tw = create_tween().set_parallel(true)
+	tw.tween_property(order_popup, "position:y", 1800, 1.0).set_trans(Tween.TRANS_CIRC).set_ease(Tween.EASE_OUT)
+	tw.tween_property(env_back, "modulate:a", 1.0, 0.2)
+	tw.tween_property(env_front, "modulate:a", 1.0, 0.2)
+	
+	tw.tween_property(letter, "position:y", 500, 0.5).set_delay(0.3).set_trans(Tween.TRANS_CIRC)
+	tw.tween_property(letter, "scale:y", 1.0, 0.5).set_delay(0.3)
+	tw.tween_property(letter, "modulate:a", 1.0, 0.2).set_delay(0.3)
+	
+	await tw.finished
+	ready_button.show()
+	create_tween().tween_property(ready_button, "modulate:a", 1.0, 0.2)
+	is_timer_active = true
 
-[node name="BG_Gameplay" type="TextureRect" parent="CanvasLayer" unique_id=2135953049]
-anchors_preset = 15
-anchor_right = 1.0
-anchor_bottom = 1.0
-grow_horizontal = 2
-grow_vertical = 2
-texture = ExtResource("2_4xruw")
-expand_mode = 1
-stretch_mode = 6
+func _on_ready_pressed():
+	if is_game_started: return
+	is_timer_active = false
+	start_game_flow()
 
-[node name="Order_PopUp" type="Control" parent="CanvasLayer" unique_id=542546169]
-layout_mode = 3
-anchors_preset = 7
-anchor_left = 0.5
-anchor_top = 1.0
-anchor_right = 0.5
-anchor_bottom = 1.0
-offset_left = -20.0
-offset_top = -40.0
-offset_right = 31.0
-offset_bottom = 11.0
-grow_horizontal = 2
-grow_vertical = 0
-script = ExtResource("3_ibde2")
-item_card_scene = ExtResource("4_0k7nw")
+func _on_timer_timeout():
+	if is_game_started: return
+	start_game_flow()
 
-[node name="EnvelopeBack" type="TextureRect" parent="CanvasLayer/Order_PopUp" unique_id=1184490690]
-layout_mode = 1
-anchors_preset = 7
-anchor_left = 0.5
-anchor_top = 1.0
-anchor_right = 0.5
-anchor_bottom = 1.0
-offset_left = -461.0
-offset_top = -641.0
-offset_right = 461.0
-offset_bottom = -102.0
-grow_horizontal = 2
-grow_vertical = 0
-texture = ExtResource("4_7h23t")
+func start_game_flow():
+	is_game_started = true
+	ready_button.disabled = true
+	if cabinet: cabinet.build_cabinet_tornado()
+	_animate_outro()
 
-[node name="LetterContainer" type="Control" parent="CanvasLayer/Order_PopUp" unique_id=1685091211]
-clip_children = 1
-anchors_preset = 0
-offset_right = 40.0
-offset_bottom = 40.0
-pivot_offset = Vector2(0, 1292)
-
-[node name="LetterPaper" type="TextureRect" parent="CanvasLayer/Order_PopUp/LetterContainer" unique_id=158396875]
-layout_mode = 1
-anchors_preset = 7
-anchor_left = 0.5
-anchor_top = 1.0
-anchor_right = 0.5
-anchor_bottom = 1.0
-offset_left = -410.0
-offset_top = -337.0
-offset_right = 410.0
-offset_bottom = 1253.0
-grow_horizontal = 2
-grow_vertical = 0
-texture = ExtResource("5_06phl")
-
-[node name="Portrait" type="TextureRect" parent="CanvasLayer/Order_PopUp/LetterContainer/LetterPaper" unique_id=1875353810]
-layout_mode = 0
-offset_right = 40.0
-offset_bottom = 40.0
-
-[node name="Name" type="Label" parent="CanvasLayer/Order_PopUp/LetterContainer/LetterPaper" unique_id=1387276769]
-layout_mode = 0
-offset_right = 40.0
-offset_bottom = 23.0
-
-[node name="Items" type="FlowContainer" parent="CanvasLayer/Order_PopUp/LetterContainer/LetterPaper" unique_id=1226858966]
-custom_minimum_size = Vector2(660, 430)
-layout_mode = 1
-anchors_preset = 8
-anchor_left = 0.5
-anchor_top = 0.5
-anchor_right = 0.5
-anchor_bottom = 0.5
-offset_left = -330.0
-offset_top = -215.0
-offset_right = 330.0
-offset_bottom = 215.0
-grow_horizontal = 2
-grow_vertical = 2
-pivot_offset = Vector2(330, 215)
-theme_override_constants/h_separation = 30
-theme_override_constants/v_separation = 30
-alignment = 1
-last_wrap_alignment = 2
-
-[node name="Reward" type="HBoxContainer" parent="CanvasLayer/Order_PopUp/LetterContainer/LetterPaper" unique_id=1704690028]
-layout_mode = 0
-offset_right = 40.0
-offset_bottom = 40.0
-
-[node name="Timer" type="Label" parent="CanvasLayer/Order_PopUp/LetterContainer/LetterPaper" unique_id=163358427]
-layout_mode = 0
-offset_right = 40.0
-offset_bottom = 23.0
-
-[node name="EnvelopeFront" type="TextureRect" parent="CanvasLayer/Order_PopUp" unique_id=745052897]
-layout_mode = 1
-anchors_preset = 7
-anchor_left = 0.5
-anchor_top = 1.0
-anchor_right = 0.5
-anchor_bottom = 1.0
-offset_left = -461.0
-offset_top = -332.0
-offset_right = 461.0
-offset_bottom = 319.0
-grow_horizontal = 2
-grow_vertical = 0
-texture = ExtResource("6_s7evf")
-
-[node name="Start_Button" type="Button" parent="CanvasLayer" unique_id=1502029723]
-unique_name_in_owner = true
-anchors_preset = -1
-anchor_left = 0.5
-anchor_top = 0.915
-anchor_right = 0.5
-anchor_bottom = 0.915
-offset_left = -234.0
-offset_top = -84.0
-offset_right = 234.0
-offset_bottom = 85.0
-grow_horizontal = 2
-grow_vertical = 2
-pivot_offset = Vector2(233, 91)
-theme_override_fonts/font = ExtResource("2_6bry8")
-theme_override_font_sizes/font_size = 54
-theme_override_styles/normal = SubResource("StyleBoxTexture_5p0eq")
-theme_override_styles/pressed = SubResource("StyleBoxTexture_ibde2")
-theme_override_styles/hover = SubResource("StyleBoxTexture_np8lt")
-text = "НАЧАТЬ"
-
-[node name="Ready_Button" type="Button" parent="CanvasLayer" unique_id=1644486306]
-anchors_preset = -1
-anchor_left = 0.5
-anchor_top = 0.915
-anchor_right = 0.5
-anchor_bottom = 0.915
-offset_left = -234.0
-offset_top = -84.0
-offset_right = 234.0
-offset_bottom = 85.0
-grow_horizontal = 2
-grow_vertical = 2
-pivot_offset = Vector2(233, 91)
-theme_override_fonts/font = ExtResource("2_6bry8")
-theme_override_font_sizes/font_size = 54
-theme_override_styles/normal = SubResource("StyleBoxTexture_5p0eq")
-theme_override_styles/pressed = SubResource("StyleBoxTexture_s7evf")
-theme_override_styles/hover = SubResource("StyleBoxTexture_0k7nw")
-text = "ГОТОВ"
-
-[node name="Cabinet" parent="." unique_id=801209297 instance=ExtResource("1_cabinet")]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.5907476, 0)
-total_rotation_degrees = null
-delay_between_rows = null
-trans_type = null
-ease_type = null
-sensitivity = null
-throw_momentum_factor = null
-friction = null
-snap_velocity_limit = null
-haptics_enabled = null
-haptic_click_ms = null
-
-[node name="WorldEnvironment" type="WorldEnvironment" parent="." unique_id=306027433]
-environment = ExtResource("3_5p0eq")
-
-[node name="DirectionalLight3D" type="DirectionalLight3D" parent="." unique_id=1137128270]
-transform = Transform3D(0.74371827, -0.14443202, 0.65270406, -0.082728826, 0.94899005, 0.30425966, -0.6633544, -0.2802809, 0.6938325, 10.862908, 12.415967, 14.848169)
-light_color = Color(1, 0.98039216, 0.8745098, 1)
-light_energy = 0.8
-light_angular_distance = 1.5
-shadow_enabled = true
-shadow_bias = 0.05
-
-[node name="Camera3D" type="Camera3D" parent="." unique_id=1317763516]
-transform = Transform3D(1, 0, 0, 0, 0.9998477, 0.017452406, 0, -0.017452406, 0.9998477, 0, 3.8874693, 27.631052)
-environment = ExtResource("3_5p0eq")
-current = true
-fov = 35.0
+func _animate_outro():
+	var tw = create_tween().set_parallel(true)
+	tw.tween_property(order_popup, "position:y", 2300, 0.8).set_trans(Tween.TRANS_CIRC).set_ease(Tween.EASE_IN)
+	tw.tween_property(letter, "modulate:a", 0.0, 0.3)
+	tw.tween_property(ready_button, "modulate:a", 0.0, 0.3)
+	tw.chain().tween_callback(ready_button.hide)
