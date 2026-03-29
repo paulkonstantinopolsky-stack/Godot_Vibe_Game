@@ -1,0 +1,22 @@
+[gd_scene format=3 uid="uid://dhleflnp84ip2"]
+
+[ext_resource type="Script" uid="uid://crvgbhrd84mb" path="res://Scenes/Item_3d.gd" id="1_c77cy"]
+[ext_resource type="Texture2D" uid="uid://dihp5p0do4o74" path="res://Assets/Items/potion_red.png" id="2_0ph4d"]
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_v1jnb"]
+size = Vector3(2, 2, 2)
+
+[node name="Item3D" type="Node3D" unique_id=1721106515]
+script = ExtResource("1_c77cy")
+
+[node name="Sprite3D" type="Sprite3D" parent="." unique_id=137543426]
+transform = Transform3D(0.8, 0, 0, 0, 0.8, 0, 0, 0, 0.8, 0, 0, 0)
+billboard = 2
+shaded = true
+texture_filter = 1
+texture = ExtResource("2_0ph4d")
+
+[node name="Area3D" type="Area3D" parent="." unique_id=51601814]
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="Area3D" unique_id=2035366951]
+shape = SubResource("BoxShape3D_v1jnb")

@@ -1,0 +1,32 @@
+[gd_scene format=3 uid="uid://b5fj6koyr51fg"]
+
+[ext_resource type="Script" uid="uid://dqbxce7blxp3w" path="res://Item_card.gd" id="1_fav4y"]
+[ext_resource type="Texture2D" uid="uid://dhanjkucqkdpy" path="res://Assets/2D/question_mark.png" id="2_838qr"]
+
+[node name="ItemCard" type="Control" unique_id=1914859117]
+custom_minimum_size = Vector2(120, 120)
+layout_mode = 3
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -60.0
+offset_top = -60.0
+offset_right = 60.0
+offset_bottom = 60.0
+grow_horizontal = 2
+grow_vertical = 2
+size_flags_horizontal = 4
+size_flags_vertical = 4
+script = ExtResource("1_fav4y")
+
+[node name="Icon" type="TextureRect" parent="." unique_id=351148697]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+pivot_offset = Vector2(60, 60)
+texture = ExtResource("2_838qr")

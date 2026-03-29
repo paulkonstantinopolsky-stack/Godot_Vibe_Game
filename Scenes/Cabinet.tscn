@@ -1,0 +1,10 @@
+[gd_scene format=3 uid="uid://8wt0ks3gelni"]
+
+[ext_resource type="Script" uid="uid://dg7dbbst1jfan" path="res://Scenes/cabinet.gd" id="1_q7eq5"]
+
+[node name="Node3D" type="Node3D" unique_id=1390399040]
+script = ExtResource("1_q7eq5")
+spawn_distance_min = 5.0
+spawn_distance_max = 10.0
+total_rotation_degrees = 450.0
+manual_mesh_width = 1.6

@@ -1,0 +1,5 @@
+[gd_scene format=3 uid="uid://c3ihumdef37me"]
+
+[ext_resource type="PackedScene" uid="uid://bgk338ux6ij3c" path="res://Assets/Models/Cell_Green.glb" id="1_mpryy"]
+
+[node name="Cell_Green" unique_id=269927577 instance=ExtResource("1_mpryy")]

@@ -1,0 +1,8 @@
+[gd_scene format=3 uid="uid://bx14u26sv0tyf"]
+
+[ext_resource type="PackedScene" uid="uid://cg7np4ptnpkln" path="res://Assets/Models/Top_Down.glb" id="1_f7345"]
+
+[node name="Top_Down" unique_id=44619090 instance=ExtResource("1_f7345")]
+
+[node name="Base and Top" parent="." index="0" unique_id=1376305003]
+transform = Transform3D(1.0746219, 0, 0, 0, 0.8249857, 0, 0, 0, 1.0746219, 0, 0, 0)
