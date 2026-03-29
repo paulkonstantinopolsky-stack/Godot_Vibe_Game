@@ -1,0 +1,26 @@
+[gd_scene format=3 uid="uid://u5gntfpcipaa"]
+
+[ext_resource type="Script" uid="uid://vbup7naatafb" path="res://Scenes/side_widget.gd" id="1_dirqp"]
+[ext_resource type="Texture2D" uid="uid://qlxf7w5jny2o" path="res://Assets/2D/Small_Envelope.png" id="1_hrqo8"]
+
+[node name="SideWidget" type="Control" unique_id=2032529895]
+custom_minimum_size = Vector2(130, 876)
+layout_mode = 3
+anchors_preset = 0
+script = ExtResource("1_dirqp")
+
+[node name="SmallEnvelope" type="TextureRect" parent="." unique_id=1579572616]
+custom_minimum_size = Vector2(130, 136)
+layout_mode = 1
+offset_top = 740.0
+offset_right = 130.0
+offset_bottom = 876.0
+texture = ExtResource("1_hrqo8")
+
+[node name="ItemsContainer" type="Control" parent="." unique_id=1864778913]
+custom_minimum_size = Vector2(120, 720)
+layout_mode = 1
+anchors_preset = 0
+offset_left = 5.0
+offset_right = 125.0
+offset_bottom = 720.0

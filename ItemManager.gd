@@ -11,6 +11,17 @@ var items_db = {
 }
 
 var current_order = []
+# --- СИГНАЛЫ ---
+signal item_found(id)
+
+# --- ФУНКЦИЯ ДЛЯ ВЫЗОВА ПРИ КЛИКЕ ---
+func mark_item_as_found(item_id: int):
+	for item in current_order:
+		if item["id"] == item_id and not item["found"]:
+			item["found"] = true
+			item_found.emit(item_id) # Сигнал виджету: "Переворачивай!"
+			print("ПРЕДМЕТ НАЙДЕН: ID ", item_id)
+			break
 
 func _ready():
 	check_resources()

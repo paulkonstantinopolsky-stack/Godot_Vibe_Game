@@ -12,6 +12,7 @@
 [ext_resource type="Texture2D" uid="uid://bbvo82e2lqwdp" path="res://Assets/2D/Letter.png" id="5_06phl"]
 [ext_resource type="Texture2D" uid="uid://bn060pxm84m5p" path="res://Assets/2D/Front.png" id="6_s7evf"]
 [ext_resource type="Texture2D" uid="uid://dx8cho3u0k5o2" path="res://Assets/2D/Start_Button_Pressed.png" id="8_s7evf"]
+[ext_resource type="PackedScene" uid="uid://u5gntfpcipaa" path="res://Scenes/SideWidget.tscn" id="11_np8lt"]
 
 [sub_resource type="StyleBoxTexture" id="StyleBoxTexture_5p0eq"]
 texture = ExtResource("2_4y1r4")
@@ -213,6 +214,12 @@ theme_override_styles/normal = SubResource("StyleBoxTexture_5p0eq")
 theme_override_styles/pressed = SubResource("StyleBoxTexture_s7evf")
 theme_override_styles/hover = SubResource("StyleBoxTexture_0k7nw")
 text = "ГОТОВ"
+
+[node name="SideWidget" parent="CanvasLayer" unique_id=2032529895 instance=ExtResource("11_np8lt")]
+offset_left = 30.0
+offset_top = 27.0
+offset_right = -920.0
+offset_bottom = -1473.0
 
 [node name="Cabinet" parent="." unique_id=801209297 instance=ExtResource("1_cabinet")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.5907476, 0)
