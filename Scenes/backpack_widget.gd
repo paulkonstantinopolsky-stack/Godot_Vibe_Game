@@ -1,7 +1,8 @@
 extends Control
 
+# Обрати внимание, теперь мы ищем GridContainer!
 @onready var backpack_bg = $BackpackBG
-@onready var grid = $BackpackBG/CenterContainer/VBoxContainer
+@onready var grid = $BackpackBG/CenterContainer/GridContainer 
 @onready var edit_menu = get_node_or_null("EditMenu") 
 
 var hide_pos_offset = 600 
@@ -39,12 +40,19 @@ func build_drag_preview(item_id: int, shape: Array):
 	for c in drag_preview_container.get_children():
 		c.queue_free()
 
-	if grid.get_child_count() == 0: return
-	var sample_cell = grid.get_child(0).get_child(0)
-	var c_size = sample_cell.size
-	var spacing = Vector2(10, 10) # Учитываем зазоры между ячейками для превью!
+	var sample_cell = null
+	for c in grid.get_children():
+		if c.has_node("ItemIcon"):
+			sample_cell = c
+			break
+	if not sample_cell: return
 
-	# Рисуем клеточки паззла
+	var c_size = sample_cell.size
+	# Читаем реальные отступы сетки, чтобы превью 1 в 1 совпадало с рюкзаком
+	var h_sep = grid.get_theme_constant("h_separation")
+	var v_sep = grid.get_theme_constant("v_separation")
+	var spacing = Vector2(h_sep if h_sep > 0 else 0, v_sep if v_sep > 0 else 0)
+
 	for offset in shape:
 		var cell_bg = ColorRect.new()
 		cell_bg.color = Color(0.25, 0.15, 0.1, 0.85)
@@ -58,7 +66,6 @@ func build_drag_preview(item_id: int, shape: Array):
 		cell_bg.add_child(outline)
 		drag_preview_container.add_child(cell_bg)
 
-	# Иконка предмета
 	var icon = TextureRect.new()
 	icon.texture = load(ItemManager.items_db[item_id]["texture"])
 	icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
@@ -73,9 +80,10 @@ func show_external_drag_preview(item_id: int, mouse_pos: Vector2):
 	drag_preview_container.show()
 
 func update_external_drag_preview(mouse_pos: Vector2):
-	if grid.get_child_count() > 0:
-		var c_size = grid.get_child(0).get_child(0).size
-		drag_preview_container.global_position = mouse_pos - (c_size / 2.0)
+	for c in grid.get_children():
+		if c.has_node("ItemIcon"):
+			drag_preview_container.global_position = mouse_pos - (c.size / 2.0)
+			break
 
 func hide_external_drag_preview():
 	drag_preview_container.hide()
@@ -94,27 +102,23 @@ func _input(event):
 					var target_root = clicked_cell.get_meta("root_cell")
 					var target_shape = target_root.get_meta("current_shape")
 
-					# 1. ТАЩИМ ТЕКУЩИЙ ПРЕДМЕТ
 					if occupant_id == active_item_id and ItemManager.is_edit_mode:
 						is_dragging_internal = true
 						_hide_icons_for_shape(active_cell, active_shape)
 						build_drag_preview(active_item_id, active_shape)
 						update_external_drag_preview(mouse_pos)
 						drag_preview_container.show()
-						# Меню НЕ прячем!
 						get_viewport().set_input_as_handled()
 						
-					# 2. ВЫБИРАЕМ ДРУГОЙ ПРЕДМЕТ
 					else:
-						_set_all_borders(0) # Очищаем старые рамки
+						# ПЕРЕХВАТ: Если кликнули на другой предмет, меню НЕ закрываем, просто переносим рамку!
+						_set_all_borders(0)
 						_start_edit_mode(target_root, occupant_id, null, target_shape)
 						get_viewport().set_input_as_handled()
 				else:
-					# 3. КЛИК В ПУСТОТУ (Закрываем)
 					if ItemManager.is_edit_mode and edit_menu and not edit_menu.get_global_rect().has_point(mouse_pos):
 						_close_edit_mode()
 						
-		# ОТПУСКАЕМ МЫШКУ (Бросаем предмет)
 		else:
 			if is_dragging_internal:
 				is_dragging_internal = false
@@ -141,7 +145,7 @@ func _input(event):
 		update_external_drag_preview(mouse_pos)
 		get_viewport().set_input_as_handled()
 
-# --- ЛОГИКА ТЕТРИСА ---
+# --- ЛОГИКА ТЕТРИСА (GRID CONTAINER) ---
 func try_add_item(item_id: int, mouse_pos: Vector2, drag_node: Node3D = null) -> bool:
 	var item_data = ItemManager.items_db.get(item_id)
 	if not item_data: return false
@@ -163,7 +167,8 @@ func _can_place_shape(root_cell: Control, shape: Array, ignore_active: bool = fa
 	for offset in shape:
 		var target_coords = root_coords + Vector2i(offset.x, offset.y)
 		var cell = _get_cell_by_coords(target_coords)
-		if cell == null: return false
+		# Если вышли за край или попали в пустую зону (затычку)
+		if cell == null: return false 
 		var occupant_id = cell.get_meta("occupied_by_id", -1)
 		if occupant_id != -1 and not (ignore_active and occupant_id == active_item_id):
 			return false
@@ -181,8 +186,9 @@ func _place_item_in_grid(root_cell: Control, item_id: int, shape: Array):
 	var root_coords = _get_cell_coords(root_cell)
 	for offset in shape:
 		var cell = _get_cell_by_coords(root_coords + Vector2i(offset.x, offset.y))
-		cell.set_meta("occupied_by_id", item_id)
-		cell.set_meta("root_cell", root_cell)
+		if cell:
+			cell.set_meta("occupied_by_id", item_id)
+			cell.set_meta("root_cell", root_cell)
 
 func _clear_item_from_grid(root_cell: Control, shape: Array):
 	var root_coords = _get_cell_coords(root_cell)
@@ -235,7 +241,6 @@ func _start_edit_mode(cell: Control, item_id: int, drag_node: Node3D, shape: Arr
 	active_shape = shape if shape.size() > 0 else ItemManager.items_db[item_id]["shape"]
 	ItemManager.is_edit_mode = true
 	
-	# Если меню уже было открыто, не проигрываем анимацию появления
 	if edit_menu and not was_edit_mode:
 		edit_menu.modulate.a = 1.0
 		edit_menu.show()
@@ -258,8 +263,8 @@ func _close_edit_mode():
 
 # --- УПРАВЛЕНИЕ РАМКАМИ ---
 func _set_all_borders(state_id: int):
-	for row in grid.get_children():
-		for cell in row.get_children():
+	for cell in grid.get_children():
+		if cell.has_node("ItemIcon"):
 			_set_single_border(cell, state_id)
 
 func _set_single_border(cell: Control, state_id: int):
@@ -275,26 +280,35 @@ func _refresh_edit_borders():
 		var cell = _get_cell_by_coords(rc + Vector2i(offset.x, offset.y))
 		if cell: _set_single_border(cell, 2)
 
-# --- ВСПОМОГАТЕЛЬНЫЕ ---
+# --- НОВАЯ МАТЕМАТИКА КООРДИНАТ ДЛЯ GRID CONTAINER ---
 func _get_cell_coords(cell: Control) -> Vector2i:
-	return Vector2i(cell.get_index(), cell.get_parent().get_index())
+	var idx = cell.get_index()
+	return Vector2i(idx % grid.columns, idx / grid.columns)
 
 func _get_cell_by_coords(coords: Vector2i) -> Control:
-	if coords.y < 0 or coords.y >= grid.get_child_count(): return null
-	var row = grid.get_child(coords.y)
-	if coords.x < 0 or coords.x >= row.get_child_count(): return null
-	return row.get_child(coords.x)
+	if coords.x < 0 or coords.x >= grid.columns: return null
+	
+	var max_y = ceil(float(grid.get_child_count()) / grid.columns)
+	if coords.y < 0 or coords.y >= max_y: return null
+	
+	var idx = coords.y * grid.columns + coords.x
+	if idx < 0 or idx >= grid.get_child_count(): return null
+	
+	var cell = grid.get_child(idx)
+	# Защита: если это пустой Control (затычка), считаем, что ячейки нет
+	if not cell.has_node("ItemIcon"): return null 
+	return cell
 
 func _get_cell_at_pos(pos: Vector2) -> Control:
-	for row in grid.get_children():
-		for cell in row.get_children():
-			if cell.get_global_rect().has_point(pos): return cell
+	for cell in grid.get_children():
+		if cell.has_node("ItemIcon") and cell.get_global_rect().has_point(pos):
+			return cell
 	return null
 
 func _find_first_free_slot(shape: Array) -> Control:
-	for row in grid.get_children():
-		for cell in row.get_children():
-			if _can_place_shape(cell, shape): return cell
+	for cell in grid.get_children():
+		if cell.has_node("ItemIcon") and _can_place_shape(cell, shape): 
+			return cell
 	return null
 
 func _hide_icons_for_shape(root: Control, _shape: Array):
