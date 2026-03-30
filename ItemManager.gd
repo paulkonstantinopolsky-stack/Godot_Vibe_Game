@@ -14,11 +14,11 @@ var current_order = []
 
 # --- СИГНАЛЫ ---
 signal item_found(id)
-
-# --- ПЕРЕМЕННЫЕ И СИГНАЛЫ ДЛЯ DRAG-AND-DROP ---
-# Теперь сигнал передает еще и сам 3D узел, чтобы мы могли его прятать!
 signal item_pressed(id: int, tex_path: String, node: Node3D) 
+
+# --- ПЕРЕМЕННЫЕ СОСТОЯНИЙ ---
 var is_dragging_item: bool = false 
+var is_edit_mode: bool = false # ТА САМАЯ ПЕРЕМЕННАЯ ДЛЯ РЕЖИМА РЕДАКТИРОВАНИЯ
 
 func mark_item_as_found(item_id: int):
 	for item in current_order:
