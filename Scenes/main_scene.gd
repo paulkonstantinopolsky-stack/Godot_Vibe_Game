@@ -1,14 +1,15 @@
 extends Node3D
 
-# --- ССЫЛКИ НА УЗЛЫ ---
-@onready var order_popup = $CanvasLayer/Order_PopUp
-@onready var env_back = $CanvasLayer/Order_PopUp/EnvelopeBack
-@onready var env_front = $CanvasLayer/Order_PopUp/EnvelopeFront
-@onready var letter = $CanvasLayer/Order_PopUp/LetterContainer
-@onready var start_button = $CanvasLayer/Start_Button
-@onready var ready_button = $CanvasLayer/Ready_Button
-@onready var timer_label = $CanvasLayer/Order_PopUp/LetterContainer/LetterPaper/Timer
-@onready var side_widget = $CanvasLayer/SideWidget
+# --- ССЫЛКИ НА УЗЛЫ (Пути обновлены под UILayer) ---
+@onready var order_popup = $UILayer/Order_PopUp
+@onready var env_back = $UILayer/Order_PopUp/EnvelopeBack
+@onready var env_front = $UILayer/Order_PopUp/EnvelopeFront
+@onready var letter = $UILayer/Order_PopUp/LetterContainer
+@onready var start_button = $UILayer/Start_Button
+@onready var ready_button = $UILayer/Ready_Button
+@onready var timer_label = $UILayer/Order_PopUp/LetterContainer/LetterPaper/Timer
+@onready var side_widget = $UILayer/SideWidget
+@onready var backpack_widget = $UILayer/BackpackWidget
 
 @export_group("Ссылки на объекты")
 @export var cabinet: Node3D
@@ -70,7 +71,9 @@ func _ready():
 	env_front.modulate.a = 0.0
 	letter.modulate.a = 0.0
 	
+	# Принудительно прячем виджеты до начала игры
 	if side_widget: side_widget.hide()
+	if backpack_widget: backpack_widget.hide()
 	if cabinet: cabinet.hide()
 
 func _process(delta):
@@ -137,8 +140,11 @@ func start_game_flow():
 	
 	outro.tween_property(ready_button, "modulate:a", 0.0, let_outro_fade)
 	
-	# После того как всё исчезло — запускаем виджет
+	# После того как всё исчезло — запускаем виджеты
 	outro.chain().tween_callback(ready_button.hide)
 	outro.chain().tween_callback(func(): 
-		if side_widget: side_widget.start_appear_animation()
+		if side_widget: 
+			side_widget.start_appear_animation()
+		if backpack_widget: 
+			backpack_widget.start_appear_animation() # Запуск анимации появления рюкзака
 	)

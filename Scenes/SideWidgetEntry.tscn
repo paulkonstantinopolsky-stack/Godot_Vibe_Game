@@ -21,7 +21,7 @@ pivot_offset = Vector2(60, 60)
 script = ExtResource("1_8hce4")
 
 [node name="Back" type="TextureRect" parent="." unique_id=461809299]
-texture_filter = 4
+texture_filter = 6
 custom_minimum_size = Vector2(120, 120)
 layout_mode = 1
 anchors_preset = 15
@@ -33,7 +33,7 @@ texture = ExtResource("1_26bag")
 stretch_mode = 5
 
 [node name="Front" type="TextureRect" parent="." unique_id=857789324]
-texture_filter = 4
+texture_filter = 6
 custom_minimum_size = Vector2(120, 120)
 layout_mode = 1
 anchors_preset = 15

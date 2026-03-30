@@ -1,0 +1,36 @@
+[gd_scene format=3 uid="uid://cg1q0glia0njp"]
+
+[ext_resource type="Texture2D" uid="uid://siugbksbqers" path="res://Assets/2D/Frame.png" id="1_fc6vx"]
+
+[node name="BackpackCell" type="Control" unique_id=140121735]
+custom_minimum_size = Vector2(148, 148)
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_right = -932.0
+offset_bottom = -2252.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="Frame" type="TextureRect" parent="." unique_id=817835445]
+texture_filter = 6
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+texture = ExtResource("1_fc6vx")
+stretch_mode = 5
+
+[node name="ItemIcon" type="TextureRect" parent="." unique_id=997554505]
+texture_filter = 6
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+texture = ExtResource("1_fc6vx")
+stretch_mode = 5
