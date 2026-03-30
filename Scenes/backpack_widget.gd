@@ -30,7 +30,45 @@ func _ready():
 	_update_grid_visuals()
 
 # ==========================================================
-# --- МОНОЛИТНАЯ ОТРИСОВКА ---
+# --- ИНДУСТРИАЛЬНЫЙ СТАНДАРТ ЦЕНТРОВКИ ИКОНОК ---
+# ==========================================================
+func _align_icon_in_bbox(icon: TextureRect, item_id: int, current_shape: Array, rot_deg: int):
+	if grid.get_child_count() == 0: return
+	var c_size = grid.get_child(0).size
+	var h_sep = grid.get_theme_constant("h_separation")
+	var v_sep = grid.get_theme_constant("v_separation")
+	var spacing = Vector2(max(0, h_sep), max(0, v_sep))
+
+	# 1. Узнаем ИСХОДНЫЙ размер предмета до любых вращений
+	var orig_shape = ItemManager.items_db[item_id]["shape"]
+	var o_max_x = 0; var o_max_y = 0
+	for p in orig_shape:
+		if p.x > o_max_x: o_max_x = p.x
+		if p.y > o_max_y: o_max_y = p.y
+		
+	var orig_w = (o_max_x + 1) * c_size.x + o_max_x * spacing.x
+	var orig_h = (o_max_y + 1) * c_size.y + o_max_y * spacing.y
+
+	# Задаем иконке размер исходного Bounding Box и ставим Pivot ровно по центру
+	icon.size = Vector2(orig_w, orig_h)
+	icon.pivot_offset = icon.size / 2.0
+	icon.rotation_degrees = rot_deg
+
+	# 2. Узнаем ТЕКУЩИЙ размер слитого блока (чтобы понять, куда подвинуть центр)
+	var c_max_x = 0; var c_max_y = 0
+	for p in current_shape:
+		if p.x > c_max_x: c_max_x = p.x
+		if p.y > c_max_y: c_max_y = p.y
+
+	var cur_w = (c_max_x + 1) * c_size.x + c_max_x * spacing.x
+	var cur_h = (c_max_y + 1) * c_size.y + c_max_y * spacing.y
+
+	# 3. Физически смещаем иконку так, чтобы её Pivot совпал с центром нового блока
+	var target_center = Vector2(cur_w, cur_h) / 2.0
+	icon.position = target_center - icon.pivot_offset
+
+# ==========================================================
+# --- МОНОЛИТНАЯ ОТРИСОВКА (ИДЕАЛЬНЫЕ УГЛЫ И СТЫКИ) ---
 # ==========================================================
 
 func _get_merged_stylebox(shape: Array, offset: Vector2, is_focused: bool, is_preview: bool) -> StyleBoxFlat:
@@ -91,7 +129,6 @@ func _draw_merged_item(item_id: int, start_cell: Control, shape: Array, is_focus
 		style.draw(grid.get_canvas_item(), rect)
 
 func _on_grid_draw():
-	# ИСПРАВЛЕНИЕ: Теперь запоминаем УНИКАЛЬНЫЕ ЯЧЕЙКИ (инстансы), а не ID предметов
 	var processed_roots = []
 	for cell in grid.get_children():
 		if not cell.has_node("ItemIcon"): continue
@@ -116,7 +153,6 @@ func _update_grid_visuals():
 
 		var is_occupied = cell.get_meta("occupied_by_id", -1) != -1
 		
-		# ИСПРАВЛЕНИЕ: Прячем рамку только у того конкретного предмета, который тащим!
 		if is_occupied and is_dragging_internal and cell.get_meta("root_cell") == active_cell:
 			is_occupied = false
 
@@ -138,7 +174,7 @@ func _setup_drag_preview():
 	add_child(drag_preview_container)
 	drag_preview_container.hide()
 
-func build_drag_preview(item_id: int, shape: Array):
+func build_drag_preview(item_id: int, shape: Array, rot_deg: int = 0):
 	for c in drag_preview_container.get_children(): c.queue_free()
 
 	var sample_cell = null
@@ -177,12 +213,14 @@ func build_drag_preview(item_id: int, shape: Array):
 	icon.texture = load(ItemManager.items_db[item_id]["texture"])
 	icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-	icon.size = c_size
 	drag_preview_container.add_child(icon)
+	
+	# Центруем иконку превью по индустриальному стандарту
+	_align_icon_in_bbox(icon, item_id, shape, rot_deg)
 
 func show_external_drag_preview(item_id: int, mouse_pos: Vector2):
 	var shape = ItemManager.items_db[item_id]["shape"]
-	build_drag_preview(item_id, shape)
+	build_drag_preview(item_id, shape, 0)
 	update_external_drag_preview(mouse_pos)
 	drag_preview_container.show()
 
@@ -208,12 +246,12 @@ func _input(event):
 				if occupant_id != -1:
 					var target_root = clicked_cell.get_meta("root_cell")
 					var target_shape = target_root.get_meta("current_shape")
+					var target_rot = target_root.get_meta("rot_deg", 0)
 					
-					# ИСПРАВЛЕНИЕ: Сравниваем конкретные ячейки, а не ID!
 					if target_root == active_cell and ItemManager.is_edit_mode:
 						is_dragging_internal = true
 						_hide_icons_for_shape(active_cell, active_shape)
-						build_drag_preview(active_item_id, active_shape)
+						build_drag_preview(active_item_id, active_shape, target_rot)
 						update_external_drag_preview(mouse_pos)
 						drag_preview_container.show()
 						_update_grid_visuals()
@@ -231,11 +269,10 @@ func _input(event):
 				var target_root = _get_cell_at_pos(mouse_pos)
 				var success = false
 				if target_root and _can_place_shape(target_root, active_shape, true):
-					var old_rot = active_cell.get_node("ItemIcon").rotation_degrees
+					var old_rot = active_cell.get_meta("rot_deg", 0)
 					_clear_item_from_grid(active_cell, active_shape)
 					active_cell = target_root
-					_place_item_in_grid(active_cell, active_item_id, active_shape)
-					active_cell.get_node("ItemIcon").rotation_degrees = old_rot
+					_place_item_in_grid(active_cell, active_item_id, active_shape, old_rot)
 					success = true
 				if not success: _show_icons_for_shape(active_cell, active_shape)
 				_update_grid_visuals()
@@ -251,7 +288,7 @@ func try_add_item(item_id: int, mouse_pos: Vector2, drag_node: Node3D = null) ->
 	var target_root = _get_cell_at_pos(mouse_pos)
 	if not target_root: target_root = _find_first_free_slot(shape)
 	if target_root and _can_place_shape(target_root, shape):
-		_place_item_in_grid(target_root, item_id, shape)
+		_place_item_in_grid(target_root, item_id, shape, 0)
 		_start_edit_mode(target_root, item_id, drag_node, shape)
 		return true
 	return false
@@ -263,18 +300,22 @@ func _can_place_shape(root_cell: Control, shape: Array, ignore_active: bool = fa
 		var cell = _get_cell_by_coords(target_coords)
 		if cell == null: return false 
 		var occupant_id = cell.get_meta("occupied_by_id", -1)
-		# ИСПРАВЛЕНИЕ: Разрешаем накладывать только на себя
 		if occupant_id != -1 and not (ignore_active and cell.get_meta("root_cell") == active_cell): 
 			return false
 	return true
 
-func _place_item_in_grid(root_cell: Control, item_id: int, shape: Array):
+func _place_item_in_grid(root_cell: Control, item_id: int, shape: Array, rot_deg: int):
 	var tex_path = ItemManager.items_db[item_id]["texture"]
 	var icon = root_cell.get_node("ItemIcon")
 	icon.texture = load(tex_path)
 	icon.show()
-	icon.pivot_offset = icon.size / 2.0
+	
+	# Вызываем нашу новую идеальную центровку
+	_align_icon_in_bbox(icon, item_id, shape, rot_deg)
+	
 	root_cell.set_meta("current_shape", shape)
+	root_cell.set_meta("rot_deg", rot_deg)
+	
 	var root_coords = _get_cell_coords(root_cell)
 	for offset in shape:
 		var cell = _get_cell_by_coords(root_coords + Vector2i(offset.x, offset.y))
@@ -287,6 +328,7 @@ func _clear_item_from_grid(root_cell: Control, shape: Array):
 		var cell = _get_cell_by_coords(root_coords + Vector2i(offset.x, offset.y))
 		if cell: cell.remove_meta("occupied_by_id"); cell.remove_meta("root_cell")
 	root_cell.remove_meta("current_shape")
+	root_cell.remove_meta("rot_deg")
 	root_cell.get_node("ItemIcon").texture = null
 	root_cell.get_node("ItemIcon").hide()
 	_update_grid_visuals()
@@ -295,12 +337,76 @@ func _on_btn_rotate():
 	if not active_cell: return
 	var new_shape = []
 	for p in active_shape: new_shape.append(Vector2(-p.y, p.x))
-	if _can_place_shape(active_cell, new_shape, true):
-		var old_rot = active_cell.get_node("ItemIcon").rotation_degrees
+	
+	# 1. НОРМАЛИЗАЦИЯ ФОРМЫ (Прижимаем обратно к левому верхнему углу)
+	var min_x = 999; var min_y = 999
+	var max_x = -999; var max_y = -999
+	for p in new_shape:
+		if p.x < min_x: min_x = p.x
+		if p.y < min_y: min_y = p.y
+		if p.x > max_x: max_x = p.x
+		if p.y > max_y: max_y = p.y
+
+	for i in range(new_shape.size()):
+		new_shape[i] = Vector2(new_shape[i].x - min_x, new_shape[i].y - min_y)
+
+	var new_max_x = max_x - min_x
+	var new_max_y = max_y - min_y
+
+	# 2. ИНДУСТРИАЛЬНЫЙ ЦЕНТР ВРАЩЕНИЯ (Математика центра масс)
+	var old_max_x = 0; var old_max_y = 0
+	for p in active_shape:
+		if p.x > old_max_x: old_max_x = p.x
+		if p.y > old_max_y: old_max_y = p.y
+
+	var old_cx = old_max_x / 2.0
+	var old_cy = old_max_y / 2.0
+	var new_cx = new_max_x / 2.0
+	var new_cy = new_max_y / 2.0
+
+	# Вычисляем, куда нужно сдвинуть корень предмета, чтобы его центр остался на месте
+	var root_coords = _get_cell_coords(active_cell)
+	var new_root_x = round(root_coords.x + old_cx - new_cx)
+	var new_root_y = round(root_coords.y + old_cy - new_cy)
+	var new_root_coords = Vector2i(new_root_x, new_root_y)
+
+	# 3. WALL KICKS (Умное отталкивание от стен)
+	# Если идеальный центр заблокирован, пробуем соседние ячейки (влево, вправо, вверх, вниз)
+	var valid_root = null
+	var test_offsets = [
+		Vector2i(0,0), Vector2i(1,0), Vector2i(-1,0),
+		Vector2i(0,1), Vector2i(0,-1), Vector2i(1,1),
+		Vector2i(-1,-1), Vector2i(2,0), Vector2i(-2,0)
+	]
+
+	for offset in test_offsets:
+		var test_coords = new_root_coords + offset
+		var test_cell = _get_cell_by_coords(test_coords)
+		if test_cell and _can_place_shape(test_cell, new_shape, true):
+			valid_root = test_cell
+			break
+
+	# 4. ПРИМЕНЕНИЕ И ПЛАВНАЯ АНИМАЦИЯ
+	if valid_root:
+		var old_rot = active_cell.get_meta("rot_deg", 0)
 		_clear_item_from_grid(active_cell, active_shape)
+		
 		active_shape = new_shape
-		_place_item_in_grid(active_cell, active_item_id, active_shape)
-		active_cell.get_node("ItemIcon").rotation_degrees = old_rot + 90
+		active_cell = valid_root
+		
+		# Ставим предмет на новое место, но со СТАРЫМ углом текстуры
+		_place_item_in_grid(active_cell, active_item_id, active_shape, old_rot + 90)
+		
+		# Магия плавной анимации: заставляем текстуру физически довернуться до нового угла
+		var icon = active_cell.get_node("ItemIcon")
+		icon.rotation_degrees = old_rot # Откатываем текстуру на кадр назад
+		
+		var tw = create_tween().set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+		tw.tween_property(icon, "rotation_degrees", old_rot + 90, 0.25)
+		
+		# Сохраняем правильный угол по модулю 360, чтобы цифры не улетали в бесконечность
+		active_cell.set_meta("rot_deg", int(old_rot + 90) % 360)
+		
 		_update_grid_visuals()
 
 func _on_btn_confirm(): _close_edit_mode(); ItemManager.mark_item_as_found(active_item_id)
