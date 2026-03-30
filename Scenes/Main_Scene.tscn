@@ -69,16 +69,7 @@ stretch_mode = 6
 
 [node name="Cabinet" parent="." unique_id=801209297 instance=ExtResource("1_cabinet")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 2.3296428, -2.191621)
-total_rotation_degrees = null
-delay_between_rows = null
-trans_type = null
-ease_type = null
-sensitivity = null
-throw_momentum_factor = null
-friction = null
-snap_velocity_limit = null
-haptics_enabled = null
-haptic_click_ms = null
+total_rotation_degrees = 360.0
 
 [node name="WorldEnvironment" type="WorldEnvironment" parent="." unique_id=306027433]
 environment = ExtResource("3_5p0eq")
@@ -261,3 +252,9 @@ offset_left = 30.0
 offset_top = 27.0
 offset_right = -920.0
 offset_bottom = -1473.0
+
+[node name="DragPreview" type="TextureRect" parent="UILayer" unique_id=1281595320]
+offset_right = 40.0
+offset_bottom = 40.0
+mouse_filter = 2
+stretch_mode = 5
