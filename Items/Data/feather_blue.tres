@@ -7,4 +7,4 @@
 script = ExtResource("1_itmdt")
 id = 5
 texture = ExtResource("2_txtr")
-shape = Array[Vector2]([Vector2(0, 0), Vector2(0, 1)])
+shape_type = 1

@@ -23,7 +23,8 @@ var dash_offset = 0.0
 var focused_style: StyleBoxFlat
 
 @onready var default_png = $DefaultBorderPNG
-@onready var focus_triangles_png = $FocusTrianglesPNG
+# Безопасный вызов, так как узла больше нет в сцене
+@onready var focus_triangles_png = get_node_or_null("FocusTrianglesPNG")
 @onready var root_cell = $".."
 
 # --- ПЕРЕМЕННЫЕ ДЛЯ ПЛАВНЫХ АНИМАЦИЙ ---
@@ -43,17 +44,6 @@ func _ready():
 	if default_png: 
 		default_png.hide()
 		default_png.modulate.a = 1.0
-	
-	if focus_triangles_png:
-		focus_triangles_png.hide()
-		focus_triangles_png.modulate.a = 0.0
-		# Автоматически раздвигаем стрелки наружу на 24px
-		focus_triangles_png.set_anchors_preset(Control.PRESET_FULL_RECT)
-		var offset_val = 24.0 
-		focus_triangles_png.offset_left = -offset_val
-		focus_triangles_png.offset_top = -offset_val
-		focus_triangles_png.offset_right = offset_val
-		focus_triangles_png.offset_bottom = offset_val
 
 func _process(delta):
 	var needs_redraw = false
@@ -99,14 +89,10 @@ func set_state(new_state: int):
 	if default_png:
 		default_png.show()
 		fade_tween.tween_property(default_png, "modulate:a", target_def, 0.2)
-	if focus_triangles_png:
-		focus_triangles_png.show()
-		fade_tween.tween_property(focus_triangles_png, "modulate:a", target_foc, 0.2)
 	
 	# В конце анимации выключаем видимость полностью прозрачных PNG, чтобы экономить ресурсы
 	fade_tween.chain().tween_callback(func():
 		if current_state != State.DEFAULT and default_png: default_png.hide()
-		if current_state != State.FOCUSED and focus_triangles_png: focus_triangles_png.hide()
 	)
 
 func _draw():

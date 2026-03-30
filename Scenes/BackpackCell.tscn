@@ -1,7 +1,6 @@
 [gd_scene format=3 uid="uid://cg1q0glia0njp"]
 
 [ext_resource type="Script" uid="uid://dui0regqxfmbp" path="res://Scenes/cell_border.gd" id="2_wkpra"]
-[ext_resource type="Texture2D" uid="uid://dmpr3w0fqantf" path="res://Assets/2D/FocusTriangles.png" id="3_4xagw"]
 [ext_resource type="Texture2D" uid="uid://c452meym2bodk" path="res://Assets/2D/Default_Bg_Texture.png" id="3_7xm1p"]
 [ext_resource type="Texture2D" uid="uid://b58aonykwbwg7" path="res://Assets/2D/DefaultBorder.png" id="3_y2dck"]
 [ext_resource type="Texture2D" uid="uid://du3hi5hn4ebwx" path="res://Assets/2D/Focused_Bg_Texture.png" id="4_h04ix"]
@@ -36,18 +35,6 @@ anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
 texture = ExtResource("3_y2dck")
-expand_mode = 1
-
-[node name="FocusTrianglesPNG" type="TextureRect" parent="CellBorder" unique_id=746893321]
-layout_mode = 1
-anchors_preset = -1
-anchor_left = -0.2
-anchor_top = -0.2
-anchor_right = 1.2
-anchor_bottom = 1.2
-grow_horizontal = 2
-grow_vertical = 2
-texture = ExtResource("3_4xagw")
 expand_mode = 1
 
 [node name="ItemIcon" type="TextureRect" parent="." unique_id=997554505]

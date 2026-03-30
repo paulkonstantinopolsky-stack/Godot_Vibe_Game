@@ -26,7 +26,8 @@ func load_items_from_data():
 					items_db[res.id] = {
 						"name": file_name.get_basename(),
 						"texture": res.texture.resource_path if res.texture else "",
-						"shape": res.shape
+						# ИЗМЕНЕНО: теперь мы вызываем функцию-генератор идеальных форм!
+						"shape": res.get_shape() 
 					}
 			file_name = dir.get_next()
 	print("БАЗА ПРЕДМЕТОВ ЗАГРУЖЕНА: ", items_db.size(), " объектов")
