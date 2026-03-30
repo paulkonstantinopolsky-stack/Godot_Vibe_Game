@@ -3,6 +3,10 @@
 [ext_resource type="Script" uid="uid://bxa7y83c1d1gs" path="res://Scenes/backpack_widget.gd" id="1_j0lkr"]
 [ext_resource type="Texture2D" uid="uid://c8g5n55o0kplq" path="res://Assets/2D/BackpackBG.png" id="1_w8miy"]
 [ext_resource type="PackedScene" uid="uid://cg1q0glia0njp" path="res://Scenes/BackpackCell.tscn" id="2_3njb5"]
+[ext_resource type="Texture2D" uid="uid://6fobxk74c8kc" path="res://Assets/2D/BtnRotate.png" id="4_8mavf"]
+[ext_resource type="Texture2D" uid="uid://cwta2q3ajid8s" path="res://Assets/2D/BtnsBG.png" id="4_ujffr"]
+[ext_resource type="Texture2D" uid="uid://cdvjxdq8bsb0u" path="res://Assets/2D/BtnConfirm.png" id="5_ujffr"]
+[ext_resource type="Texture2D" uid="uid://bw0d1xe8gxfic" path="res://Assets/2D/BtnCancel.png" id="6_ycaye"]
 
 [node name="BackpackWidget" type="Control" unique_id=341769940]
 custom_minimum_size = Vector2(1160, 1010)
@@ -110,3 +114,72 @@ layout_mode = 2
 
 [node name="BackpackCell9" parent="BackpackBG/CenterContainer/VBoxContainer/HBoxContainer4" unique_id=184461799 instance=ExtResource("2_3njb5")]
 layout_mode = 2
+
+[node name="EditMenu" type="TextureRect" parent="." unique_id=1822209926]
+layout_mode = 1
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -690.0
+offset_top = -681.0
+offset_right = 690.0
+offset_bottom = -223.0
+grow_horizontal = 2
+grow_vertical = 2
+texture = ExtResource("4_ujffr")
+
+[node name="BtnRotate" type="TextureButton" parent="EditMenu" unique_id=2003330766]
+layout_mode = 1
+anchors_preset = -1
+anchor_left = 0.31811595
+anchor_top = 0.4585153
+anchor_right = 0.31811595
+anchor_bottom = 0.4585153
+offset_left = -93.0
+offset_top = -93.0
+offset_right = 93.0
+offset_bottom = 93.0
+grow_horizontal = 2
+grow_vertical = 2
+texture_normal = ExtResource("4_8mavf")
+texture_pressed = ExtResource("4_8mavf")
+texture_hover = ExtResource("4_8mavf")
+metadata/_edit_use_anchors_ = true
+
+[node name="BtnConfirm" type="TextureButton" parent="EditMenu" unique_id=1970749820]
+layout_mode = 1
+anchors_preset = -1
+anchor_left = 0.5
+anchor_top = 0.40829694
+anchor_right = 0.5
+anchor_bottom = 0.40829694
+offset_left = -93.0
+offset_top = -93.0
+offset_right = 93.0
+offset_bottom = 93.0
+grow_horizontal = 2
+grow_vertical = 2
+texture_normal = ExtResource("5_ujffr")
+texture_pressed = ExtResource("5_ujffr")
+texture_hover = ExtResource("5_ujffr")
+metadata/_edit_use_anchors_ = true
+
+[node name="BtnCancel" type="TextureButton" parent="EditMenu" unique_id=1572603793]
+layout_mode = 1
+anchors_preset = -1
+anchor_left = 0.68043476
+anchor_top = 0.4585153
+anchor_right = 0.68043476
+anchor_bottom = 0.4585153
+offset_left = -93.0
+offset_top = -93.0
+offset_right = 93.0
+offset_bottom = 93.0
+grow_horizontal = 2
+grow_vertical = 2
+texture_normal = ExtResource("6_ycaye")
+texture_pressed = ExtResource("6_ycaye")
+texture_hover = ExtResource("6_ycaye")
+metadata/_edit_use_anchors_ = true

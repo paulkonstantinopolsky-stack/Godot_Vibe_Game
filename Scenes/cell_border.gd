@@ -8,7 +8,7 @@ var current_state: State = State.DEFAULT
 @export var default_bg_texture: Texture2D
 @export var focused_bg_texture: Texture2D
 
-# --- НАСТРОЙКИ ДИЗАЙНА ---
+# --- НАСТРОЙКИ ДИЗАЙНА (ТВОИ) ---
 var corner_radius = 12.0
 var focused_width = 6.0
 var focused_color = Color("#ffffff") 
@@ -26,6 +26,12 @@ var focused_style: StyleBoxFlat
 @onready var focus_triangles_png = $FocusTrianglesPNG
 @onready var root_cell = $".."
 
+# --- ПЕРЕМЕННЫЕ ДЛЯ ПЛАВНЫХ АНИМАЦИЙ ---
+var alpha_default: float = 1.0
+var alpha_dashed: float = 0.0
+var alpha_focused: float = 0.0
+var fade_tween: Tween
+
 func _ready():
 	focused_style = StyleBoxFlat.new()
 	focused_style.bg_color = Color.TRANSPARENT
@@ -34,10 +40,13 @@ func _ready():
 	focused_style.set_corner_radius_all(int(corner_radius))
 	focused_style.anti_aliasing = true
 	
-	if default_png: default_png.hide()
+	if default_png: 
+		default_png.hide()
+		default_png.modulate.a = 1.0
 	
 	if focus_triangles_png:
 		focus_triangles_png.hide()
+		focus_triangles_png.modulate.a = 0.0
 		# Автоматически раздвигаем стрелки наружу на 24px
 		focus_triangles_png.set_anchors_preset(Control.PRESET_FULL_RECT)
 		var offset_val = 24.0 
@@ -47,55 +56,87 @@ func _ready():
 		focus_triangles_png.offset_bottom = offset_val
 
 func _process(delta):
-	if current_state == State.DASHED:
+	var needs_redraw = false
+	
+	# Двигаем пунктир, только если он хоть немного виден
+	if alpha_dashed > 0.0:
 		dash_offset += dash_speed * delta
-		queue_redraw() 
+		needs_redraw = true
+		
+	# Заставляем перерисовываться кадры во время анимации смешивания цветов
+	if fade_tween and fade_tween.is_running():
+		needs_redraw = true
+		
+	if needs_redraw:
+		queue_redraw()
 
 func set_state(new_state: int):
 	current_state = new_state as State
 	
 	if root_cell:
 		root_cell.clip_contents = false
+		if current_state == State.FOCUSED:
+			root_cell.z_index = 1
+		else:
+			root_cell.z_index = 0
+			
+	# Убиваем старую анимацию, если она не закончилась
+	if fade_tween and fade_tween.is_running():
+		fade_tween.kill()
+		
+	# Запускаем новую плавную анимацию прозрачности (0.2 сек)
+	fade_tween = create_tween().set_parallel(true).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
 	
-	if current_state == State.DEFAULT:
-		if root_cell: root_cell.z_index = 0
-		if default_png: default_png.show()
-		if focus_triangles_png: focus_triangles_png.hide()
-		
-	elif current_state == State.DASHED:
-		if root_cell: root_cell.z_index = 0
-		if default_png: default_png.hide()
-		if focus_triangles_png: focus_triangles_png.hide()
-		
-	elif current_state == State.FOCUSED:
-		if root_cell: root_cell.z_index = 1
-		if default_png: default_png.hide()
-		if focus_triangles_png: focus_triangles_png.show()
-		
-	queue_redraw()
+	var target_def = 1.0 if current_state == State.DEFAULT else 0.0
+	var target_dash = 1.0 if current_state == State.DASHED else 0.0
+	var target_foc = 1.0 if current_state == State.FOCUSED else 0.0
+	
+	fade_tween.tween_property(self, "alpha_default", target_def, 0.2)
+	fade_tween.tween_property(self, "alpha_dashed", target_dash, 0.2)
+	fade_tween.tween_property(self, "alpha_focused", target_foc, 0.2)
+	
+	# Плавно скрываем/показываем статичные PNG картинки
+	if default_png:
+		default_png.show()
+		fade_tween.tween_property(default_png, "modulate:a", target_def, 0.2)
+	if focus_triangles_png:
+		focus_triangles_png.show()
+		fade_tween.tween_property(focus_triangles_png, "modulate:a", target_foc, 0.2)
+	
+	# В конце анимации выключаем видимость полностью прозрачных PNG, чтобы экономить ресурсы
+	fade_tween.chain().tween_callback(func():
+		if current_state != State.DEFAULT and default_png: default_png.hide()
+		if current_state != State.FOCUSED and focus_triangles_png: focus_triangles_png.hide()
+	)
 
 func _draw():
 	var rect = Rect2(Vector2.ZERO, size)
 	
-	# 1. РИСУЕМ ФОН (Автоматически растягивается на 100% ячейки)
-	if current_state == State.DEFAULT or current_state == State.DASHED:
-		if default_bg_texture:
-			draw_texture_rect(default_bg_texture, rect, false)
-	elif current_state == State.FOCUSED:
-		if focused_bg_texture:
-			draw_texture_rect(focused_bg_texture, rect, false)
+	# 1. ПЛАВНЫЕ ФОНЫ (смешивание цветов)
+	var def_bg_alpha = max(alpha_default, alpha_dashed)
+	if def_bg_alpha > 0.0 and default_bg_texture:
+		draw_texture_rect(default_bg_texture, rect, false, Color(1, 1, 1, def_bg_alpha))
+		
+	if alpha_focused > 0.0 and focused_bg_texture:
+		draw_texture_rect(focused_bg_texture, rect, false, Color(1, 1, 1, alpha_focused))
 	
-	# 2. РИСУЕМ РАМКИ ПОВЕРХ ФОНА
-	if current_state == State.FOCUSED:
-		draw_style_box(focused_style, rect)
-	elif current_state == State.DASHED:
+	# 2. ПЛАВНАЯ ФОКУСНАЯ РАМКА
+	if alpha_focused > 0.0:
+		var mod_style = focused_style.duplicate()
+		mod_style.border_color.a = alpha_focused
+		draw_style_box(mod_style, rect)
+		
+	# 3. ПЛАВНЫЙ АНИМИРОВАННЫЙ ПУНКТИР
+	if alpha_dashed > 0.0:
+		var current_dash_color = dashed_color
+		current_dash_color.a = alpha_dashed
 		var inset = dashed_width / 2.0
 		var path_rect = Rect2(Vector2(inset, inset), size - Vector2(inset * 2, inset * 2))
 		var path_radius = corner_radius - inset
-		_draw_animated_dashed_rounded_rect(path_rect, path_radius)
+		_draw_animated_dashed_rounded_rect(path_rect, path_radius, current_dash_color)
 
 # --- ЛОГИКА ОТРИСОВКИ ПУНКТИРА ---
-func _draw_animated_dashed_rounded_rect(rect: Rect2, r: float):
+func _draw_animated_dashed_rounded_rect(rect: Rect2, r: float, color: Color):
 	var pts = _get_rounded_rect_points(rect, r, 10)
 	var total_length = 0.0
 	var lengths = []
@@ -113,10 +154,10 @@ func _draw_animated_dashed_rounded_rect(rect: Rect2, r: float):
 		var start_d = max(0.0, current_dist)
 		var end_d = min(total_length, current_dist + dash)
 		if end_d > start_d:
-			_draw_polyline_segment(pts, lengths, start_d, end_d)
+			_draw_polyline_segment(pts, lengths, start_d, end_d, color)
 		current_dist += cycle
 
-func _draw_polyline_segment(pts: PackedVector2Array, lengths: Array, start_d: float, end_d: float):
+func _draw_polyline_segment(pts: PackedVector2Array, lengths: Array, start_d: float, end_d: float, color: Color):
 	var segment_pts = PackedVector2Array()
 	var accumulated = 0.0
 	for i in range(pts.size() - 1):
@@ -138,7 +179,7 @@ func _draw_polyline_segment(pts: PackedVector2Array, lengths: Array, start_d: fl
 		accumulated = seg_end
 		
 	if segment_pts.size() >= 2:
-		draw_polyline(segment_pts, dashed_color, dashed_width, true)
+		draw_polyline(segment_pts, color, dashed_width, true)
 
 func _get_rounded_rect_points(rect: Rect2, r: float, points_per_arc: int) -> PackedVector2Array:
 	var pts = PackedVector2Array()

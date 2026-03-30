@@ -147,7 +147,8 @@ func _perform_drop():
 	
 	if backpack_widget and backpack_widget.get_global_rect().has_point(mouse_pos):
 		if backpack_widget.has_method("try_add_item"):
-			dropped_successfully = backpack_widget.try_add_item(potential_drag_id, mouse_pos)
+			# ИСПРАВЛЕНИЕ: Передаем potential_drag_node, чтобы рюкзак знал, какой это 3D-объект!
+			dropped_successfully = backpack_widget.try_add_item(potential_drag_id, mouse_pos, potential_drag_node)
 			
 	if dropped_successfully:
 		current_drag_node = null 
@@ -180,8 +181,8 @@ func _hide_preview_only():
 	if current_drag_node and current_drag_node.has_method("show_item"):
 		current_drag_node.show_item()
 	current_drag_node = null
-# ------------------------------
 
+# ------------------------------
 func _on_start_pressed():
 	start_button.hide()
 	ItemManager.generate_new_order()
@@ -226,6 +227,7 @@ func start_game_flow():
 	ready_button.disabled = true
 	if cabinet: cabinet.build_cabinet_tornado()
 	
+	# ИСПРАВЛЕНИЕ: Вернули анимацию Outro на ее законное место
 	var outro = create_tween().set_parallel(true)
 	outro.tween_property(order_popup, "position:y", env_outro_end_y, env_outro_duration).set_trans(env_outro_trans).set_ease(env_outro_ease)
 	outro.tween_property(env_back, "modulate:a", 0.0, env_outro_fade)
@@ -244,3 +246,42 @@ func start_game_flow():
 		if backpack_widget: 
 			backpack_widget.start_appear_animation() 
 	)
+
+# =====================================================================
+# --- ФУНКЦИЯ ВОЗВРАТА ПРЕДМЕТА ИЗ РЮКЗАКА В ШКАФ ---
+# =====================================================================
+func fly_back_to_cabinet(item_id: int, start_pos: Vector2, drag_node: Node3D):
+	ItemManager.is_dragging_item = false
+	
+	if drag_preview:
+		# 1. Загружаем нужную картинку в превью и ставим ровно на центр ячейки
+		var tex_path = ItemManager.items_db[item_id]["texture"]
+		drag_preview.texture = load(tex_path)
+		drag_preview.custom_minimum_size = Vector2.ZERO
+		drag_preview.size = drag_preview.texture.get_size() if drag_preview.texture else Vector2.ZERO
+		drag_preview.global_position = start_pos - (drag_preview.size / 2.0)
+		drag_preview.show()
+		
+		if fly_tween and fly_tween.is_running():
+			fly_tween.kill()
+			
+		# 2. Плавно отправляем её туда, где мы изначально кликнули по экрану
+		fly_tween = create_tween().set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+		var target_pos = drag_start_pos - (drag_preview.size / 2.0)
+		fly_tween.tween_property(drag_preview, "global_position", target_pos, 0.3)
+		
+		# 3. Как только долетит - прячем 2D картинку и показываем 3D предмет в шкафу
+		fly_tween.tween_callback(func():
+			drag_preview.hide()
+			drag_preview.texture = null
+			if drag_node:
+				if drag_node.has_method("show_item"):
+					drag_node.show_item()
+				else:
+					drag_node.show()
+		)
+	else:
+		# Запасной вариант (если drag_preview почему-то нет)
+		if drag_node:
+			if drag_node.has_method("show_item"): drag_node.show_item()
+			else: drag_node.show()

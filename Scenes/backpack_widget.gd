@@ -2,12 +2,10 @@ extends Control
 
 @onready var backpack_bg = $BackpackBG
 @onready var grid = $BackpackBG/CenterContainer/VBoxContainer
-# БЕЗОПАСНЫЙ ПОИСК: Если узла нет, игра не вылетит, а просто запишет сюда null
 @onready var edit_menu = get_node_or_null("EditMenu") 
 
 var hide_pos_offset = 600 
 
-# --- ПЕРЕМЕННЫЕ РЕЖИМА РЕДАКТИРОВАНИЯ ---
 var active_cell: Control = null
 var active_item_id: int = -1
 var active_drag_node: Node3D = null
@@ -93,7 +91,6 @@ func _set_all_borders(state_id: int):
 	for row in grid.get_children():
 		for cell in row.get_children():
 			var border = cell.get_node_or_null("CellBorder")
-			# БЕЗОПАСНЫЙ ВЫЗОВ: проверяем, существует ли функция, прежде чем ее вызывать
 			if border and border.has_method("set_state"):
 				border.set_state(state_id)
 
@@ -113,14 +110,15 @@ func _start_edit_mode(cell: Control, item_id: int, drag_node: Node3D):
 	_set_all_borders(1)
 	_set_single_border(active_cell, 2)
 
-	_update_edit_menu_position()
 	if edit_menu:
+		edit_menu.modulate.a = 1.0 # Убеждаемся, что прозрачность 100%
 		edit_menu.show()
+		edit_menu.scale = Vector2(0.5, 0.5)
+		edit_menu.pivot_offset = edit_menu.size / 2.0
+		var tw = create_tween().set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+		tw.tween_property(edit_menu, "scale", Vector2.ONE, 0.2)
 
-func _update_edit_menu_position():
-	if active_cell and edit_menu:
-		edit_menu.global_position = active_cell.global_position - Vector2(10, edit_menu.size.y + 15)
-
+# --- ПЕРЕТАСКИВАНИЕ ВНУТРИ РЮКЗАКА ---
 func is_mouse_over_active_cell(mouse_pos: Vector2) -> bool:
 	if active_cell and active_cell.get_global_rect().has_point(mouse_pos):
 		return true
@@ -160,7 +158,6 @@ func try_move_active_cell(mouse_pos: Vector2) -> bool:
 		_set_single_border(target_cell, 2)
 
 		active_cell = target_cell
-		_update_edit_menu_position()
 		return true
 	return false
 
@@ -174,26 +171,39 @@ func _on_btn_rotate():
 
 func _on_btn_confirm():
 	_close_edit_mode()
-	
 	var is_correct = false
 	for task in ItemManager.current_order:
 		if task["id"] == active_item_id and not task["found"]:
 			is_correct = true
 			break
-			
 	if is_correct:
 		ItemManager.mark_item_as_found(active_item_id)
 
 func _on_btn_cancel():
 	_close_edit_mode()
 	var icon = active_cell.get_node("ItemIcon")
+	
+	# Вычисляем точный центр ячейки для красивого старта полета
+	var fly_start_pos = active_cell.global_position + (active_cell.size / 2.0)
+	
 	icon.texture = null
 	icon.hide()
 	icon.rotation_degrees = 0
-	get_tree().current_scene.fly_back_to_cabinet(active_item_id, active_cell.global_position, active_drag_node)
+	
+	if get_tree().current_scene.has_method("fly_back_to_cabinet"):
+		get_tree().current_scene.fly_back_to_cabinet(active_item_id, fly_start_pos, active_drag_node)
+	else:
+		if active_drag_node:
+			if active_drag_node.has_method("show_item"): active_drag_node.show_item()
+			else: active_drag_node.show()
 
 func _close_edit_mode():
 	ItemManager.is_edit_mode = false
 	_set_all_borders(0) 
+	
+	# Плавное исчезновение меню
 	if edit_menu:
-		edit_menu.hide()
+		var tw = create_tween().set_parallel(true).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN)
+		tw.tween_property(edit_menu, "scale", Vector2(0.5, 0.5), 0.15)
+		tw.tween_property(edit_menu, "modulate:a", 0.0, 0.15)
+		tw.chain().tween_callback(edit_menu.hide)
