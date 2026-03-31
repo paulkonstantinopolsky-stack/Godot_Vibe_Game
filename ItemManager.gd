@@ -15,6 +15,28 @@ var is_edit_mode: bool = false
 var combo_score: int = 0
 var combo_failed: bool = false
 
+# =================================================================
+# ГЕОМЕТРИЯ РЮКЗАКА (для проверки вместимости при генерации форм)
+# =================================================================
+# Сетка 4×4 = 16 позиций, 4 угловые заблокированы Spacer-нодами → 12 реальных ячеек
+const _BP_COLS: int = 4
+const _BP_ROWS: int = 4
+const _BP_BLOCKED: Array = [
+	Vector2i(0, 0), Vector2i(3, 0),
+	Vector2i(0, 3), Vector2i(3, 3)
+]
+
+# Все доступные формы паззла (индекс соответствует ShapeType в item_data.gd)
+const _ALL_SHAPES: Array = [
+	[Vector2(0, 0)],                                                           # SINGLE   (1 кл.)
+	[Vector2(0, 0), Vector2(0, 1)],                                            # DOUBLE_V (2 кл.)
+	[Vector2(0, 0), Vector2(0, 1), Vector2(1, 1)],                             # CORNER_L (3 кл.)
+	[Vector2(0, 0), Vector2(1, 0), Vector2(0, 1), Vector2(1, 1)],              # SQUARE   (4 кл.)
+	[Vector2(0, 0), Vector2(1, 0), Vector2(1, 1), Vector2(2, 1)],              # ZIGZAG   (4 кл.)
+]
+
+# =================================================================
+
 func _ready():
 	load_items_from_data()
 
@@ -32,7 +54,7 @@ func load_items_from_data():
 					items_db[res.id] = {
 						"name": file_name.get_basename(),
 						"texture": res.texture.resource_path if res.texture else "",
-						"shape": shape_data 
+						"shape": shape_data
 					}
 			file_name = dir.get_next()
 	print("БАЗА ПРЕДМЕТОВ ЗАГРУЖЕНА: ", items_db.size(), " объектов")
@@ -44,28 +66,22 @@ func mark_item_as_found(item_id: int):
 	var was_just_found = false
 	
 	for item in current_order:
-		# Ищем предмет, который совпадает по ID и ЕЩЕ НЕ найден
 		if item["id"] == item_id and not item["found"]:
 			is_part_of_order = true
 			item["found"] = true
 			was_just_found = true
 			item_found.emit(item_id)
-			break # Важно! Прерываем цикл, чтобы за один раз отметить только ОДИН дубликат
+			break
 	
-	# Если мы не нашли нетронутый слот, значит либо это мусор, либо мы уже собрали все такие зелья
 	if not is_part_of_order:
-		# Проверяем, может игрок перетащил уже найденный предмет внутри рюкзака
 		var is_already_packed = false
 		for item in current_order:
 			if item["id"] == item_id and item["found"]:
 				is_already_packed = true
 				break
-				
-		# Если это вообще левый предмет или лишний дубликат - срываем комбо
 		if not is_already_packed:
 			combo_failed = true
 	else:
-		# Если мы успешно нашли новый предмет заказа - растим комбо!
 		if was_just_found and not combo_failed:
 			combo_score += 1
 			if combo_score == 2 or combo_score == 4 or combo_score == 5:
@@ -77,11 +93,113 @@ func generate_new_order():
 	combo_failed = false
 	
 	var all_ids = items_db.keys()
-	if all_ids.size() == 0: 
+	if all_ids.size() == 0:
 		print("Внимание: база предметов пуста!")
 		return
 		
-	# Генерируем 5 случайных предметов (они теперь могут повторяться!)
+	# Генерируем 5 случайных предметов (могут повторяться)
 	for i in range(5):
 		var random_id = all_ids[randi() % all_ids.size()]
 		current_order.append({"id": random_id, "found": false})
+	
+	# Назначаем рандомные формы всем предметам в базе,
+	# гарантируя что 5 предметов из заказа влезут в рюкзак
+	_assign_random_shapes()
+
+# =================================================================
+# УМНЫЙ РАНДОМ ФОРМ
+# =================================================================
+
+func _assign_random_shapes() -> void:
+	# Собираем уникальные ID предметов из заказа
+	var order_ids: Array = []
+	for item in current_order:
+		if not item["id"] in order_ids:
+			order_ids.append(item["id"])
+	
+	const MAX_ATTEMPTS := 400
+	var assigned_shapes: Dictionary = {}  # id → shape
+
+	for _attempt in range(MAX_ATTEMPTS):
+		assigned_shapes.clear()
+
+		# Случайно назначаем форму каждому уникальному ID заказа
+		for id in order_ids:
+			assigned_shapes[id] = _ALL_SHAPES[randi() % _ALL_SHAPES.size()].duplicate()
+
+		# Строим список форм для 5 слотов заказа (учитываем повторения одного ID)
+		var shapes_to_pack: Array = []
+		for item in current_order:
+			shapes_to_pack.append(assigned_shapes[item["id"]])
+
+		# Проверяем что формы вместятся — пробуем с перемешиванием порядка
+		# чтобы не было смещения в сторону «сначала большие»
+		shapes_to_pack.shuffle()
+		if _can_pack_greedy(shapes_to_pack):
+			# Применяем найденные формы
+			for id in assigned_shapes:
+				items_db[id]["shape"] = assigned_shapes[id]
+			# Рандомизируем формы для остальных предметов (не в заказе)
+			for id in items_db:
+				if not id in assigned_shapes:
+					items_db[id]["shape"] = _ALL_SHAPES[randi() % _ALL_SHAPES.size()].duplicate()
+			return
+
+	# Fallback: если за 400 попыток не нашли — назначаем минимальные формы заказу
+	print("ItemManager: не удалось найти вмещающуюся комбинацию, используем SINGLE/DOUBLE")
+	for id in order_ids:
+		items_db[id]["shape"] = _ALL_SHAPES[randi() % 2].duplicate()  # SINGLE или DOUBLE_V
+	for id in items_db:
+		if not id in order_ids:
+			items_db[id]["shape"] = _ALL_SHAPES[randi() % _ALL_SHAPES.size()].duplicate()
+
+# Жадная проверка: пробуем разместить все формы по очереди в первый свободный слот
+func _can_pack_greedy(shapes: Array) -> bool:
+	var grid: Dictionary = {}
+	for r in range(_BP_ROWS):
+		for c in range(_BP_COLS):
+			if not Vector2i(c, r) in _BP_BLOCKED:
+				grid[Vector2i(c, r)] = true
+
+	for shape in shapes:
+		if not _greedy_place(shape, grid):
+			return false
+	return true
+
+# Пробует разместить shape (с перебором ротаций и позиций).
+# При успехе занимает клетки в grid и возвращает true.
+func _greedy_place(shape: Array, grid: Dictionary) -> bool:
+	for rot in range(4):
+		var rotated: Array = _rotate_shape_norm(shape, rot)
+		for r in range(_BP_ROWS):
+			for c in range(_BP_COLS):
+				var cells: Array = []
+				var ok := true
+				for offset in rotated:
+					var cell := Vector2i(c + int(offset.x), r + int(offset.y))
+					if not grid.has(cell):
+						ok = false
+						break
+					cells.append(cell)
+				if ok:
+					for cell in cells:
+						grid.erase(cell)
+					return true
+	return false
+
+# Поворот формы на rot*90° с нормализацией к началу координат
+func _rotate_shape_norm(shape: Array, rot: int) -> Array:
+	var result: Array = shape.duplicate()
+	for _i in range(rot % 4):
+		var temp: Array = []
+		for p in result:
+			temp.append(Vector2(-p.y, p.x))
+		var min_x: float = temp[0].x
+		var min_y: float = temp[0].y
+		for p in temp:
+			if p.x < min_x: min_x = p.x
+			if p.y < min_y: min_y = p.y
+		result = []
+		for p in temp:
+			result.append(p - Vector2(min_x, min_y))
+	return result
