@@ -97,17 +97,13 @@ func _process(delta):
 # --- ЛОГИКА АВТО-СБОРКИ И АНИМАЦИЙ ПОЛЕТА ---
 # ==========================================================
 
-# Умный поиск 3D предмета в шкафу по его ID
 func _find_cabinet_item_node(parent_node: Node, target_id: int) -> Node3D:
 	if parent_node == null: return null
-	
 	if "id" in parent_node and parent_node.get("id") == target_id: return parent_node as Node3D
 	if "item_id" in parent_node and parent_node.get("item_id") == target_id: return parent_node as Node3D
-	
 	for child in parent_node.get_children():
 		var found = _find_cabinet_item_node(child, target_id)
 		if found: return found
-		
 	return null
 
 func _on_autofill_pressed():
@@ -121,62 +117,85 @@ func _on_autofill_pressed():
 
 	if required_ids.size() == 0: return
 
-	# Теперь рюкзак возвращает массив словарей с данными о том, куда встали предметы
 	var placements = backpack_widget.auto_fill_and_optimize(required_ids)
+	if placements.size() == 0: return # Если места не хватило, отменяем анимацию
 
-	# Запускаем каскадную анимацию полета для каждого предмета
-	for i in range(placements.size()):
-		var place_data = placements[i]
+	# 1. Собираем данные и сортируем предметы по высоте полки
+	var fly_data_array = []
+	for place_data in placements:
 		var id = place_data["id"]
-		var target_cell = place_data["cell"]
-		
+		var cab_node = _find_cabinet_item_node(cabinet, id)
+		fly_data_array.append({
+			"id": id,
+			"cell": place_data["cell"],
+			"cab_node": cab_node,
+			"start_y": cab_node.global_position.y if cab_node else -9999.0
+		})
+
+	# Сортируем: сверху вниз (чем больше Y, тем выше полка)
+	fly_data_array.sort_custom(func(a, b): return a["start_y"] > b["start_y"])
+
+	# 2. Плавное вращение шкафа на 720 градусов
+	var total_anim_time = 1.0 + (fly_data_array.size() * 0.15)
+	if cabinet:
+		var cab_tw = create_tween().set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
+		cab_tw.tween_property(cabinet, "rotation_degrees:y", cabinet.rotation_degrees.y + 720.0, total_anim_time)
+
+	# 3. Каскадный запуск иконок в рюкзак
+	var cam = get_viewport().get_camera_3d()
+
+	for i in range(fly_data_array.size()):
+		var data = fly_data_array[i]
+		var id = data["id"]
+		var target_cell = data["cell"]
+		var cab_node = data["cab_node"]
+
 		ItemManager.mark_item_as_found(id)
-		
-		# Создаем летящую 2D-иконку
+
 		var tex_path = ItemManager.items_db[id]["texture"]
 		var fly_icon = TextureRect.new()
 		fly_icon.texture = load(tex_path)
 		fly_icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 		fly_icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 		fly_icon.size = target_cell.size
-		fly_icon.pivot_offset = fly_icon.size / 2.0 # Для вращения в воздухе
+		fly_icon.pivot_offset = fly_icon.size / 2.0
 		fly_icon.z_index = 100
-		
-		# 1. Ищем этот предмет в 3D-шкафу
-		var cab_node = _find_cabinet_item_node(cabinet, id)
-		var start_pos = get_viewport().get_visible_rect().size / 2.0 # Запасная точка (центр экрана)
-		
-		if cab_node:
-			# Прячем предмет в шкафу!
-			if cab_node.has_method("hide_item"): cab_node.hide_item()
-			else: cab_node.hide()
-			
-			# Магия перевода 3D координат в 2D координаты экрана
-			var cam = get_viewport().get_camera_3d()
-			if cam:
-				start_pos = cam.unproject_position(cab_node.global_position)
-		
-		# Ставим иконку в начальную точку
-		fly_icon.global_position = start_pos - (fly_icon.size / 2.0)
+		fly_icon.modulate.a = 0.0 # Делаем невидимой до момента старта
 		$UILayer.add_child(fly_icon)
-		
-		# 2. Летим в рюкзак с задержкой (каскадный эффект)
+
 		var target_pos = target_cell.global_position
 		var target_rot = target_cell.get_meta("rot_deg", 0)
-		
-		var tw = create_tween().set_parallel(true).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
-		tw.tween_interval(i * 0.15) # Каждые 0.15 сек вылетает новый предмет
-		tw.chain().tween_property(fly_icon, "global_position", target_pos, 0.4)
-		tw.parallel().tween_property(fly_icon, "rotation_degrees", target_rot, 0.4) # Поворот в воздухе!
-		
-		# 3. В конце полета удаляем фейковую иконку и показываем настоящую в рюкзаке
-		tw.chain().tween_callback(func():
-			fly_icon.queue_free()
-			if is_instance_valid(target_cell) and target_cell.has_node("ItemIcon"):
-				target_cell.get_node("ItemIcon").show()
+
+		# Ждем свою очередь, затем вылетаем
+		var start_tw = create_tween()
+		start_tw.tween_interval(i * 0.15)
+		start_tw.tween_callback(func():
+			var start_pos = get_viewport().get_visible_rect().size / 2.0
+			
+			if cab_node:
+				# Прячем модельку на полке
+				if cab_node.has_method("hide_item"): cab_node.hide_item()
+				else: cab_node.hide()
+				
+				# Берем проекцию прямо с вращающегося шкафа!
+				if cam: start_pos = cam.unproject_position(cab_node.global_position)
+			
+			# Показываем 2D иконку и запускаем её
+			fly_icon.global_position = start_pos - (fly_icon.size / 2.0)
+			fly_icon.modulate.a = 1.0
+			
+			var anim_tw = create_tween().set_parallel(true).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
+			anim_tw.tween_property(fly_icon, "global_position", target_pos, 0.4)
+			anim_tw.tween_property(fly_icon, "rotation_degrees", target_rot, 0.4)
+			
+			anim_tw.chain().tween_callback(func():
+				fly_icon.queue_free()
+				if is_instance_valid(target_cell) and target_cell.has_node("ItemIcon"):
+					target_cell.get_node("ItemIcon").show()
+			)
 		)
 
-	# Плавно прячем кнопку Авто-сборки
+	# 4. Плавно прячем кнопку Авто-сборки
 	if autofill_button:
 		var tw = create_tween().set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
 		tw.tween_property(autofill_button, "modulate:a", 0.0, 0.3)
