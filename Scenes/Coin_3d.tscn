@@ -1,0 +1,22 @@
+[gd_scene format=3 uid="uid://c4xobr0racgce"]
+
+[ext_resource type="Texture2D" uid="uid://d3ugt4g1doc2t" path="res://Assets/2D/Coin.png" id="1_04krd"]
+[ext_resource type="Script" uid="uid://6t2ht1ngld2b" path="res://Scenes/coin_3d.gd" id="1_61olr"]
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_61olr"]
+size = Vector3(2, 2, 2)
+
+[node name="Coin3D" type="Node3D" unique_id=2000698399]
+script = ExtResource("1_61olr")
+
+[node name="Sprite3D" type="Sprite3D" parent="." unique_id=1740974539]
+transform = Transform3D(0.8, 0, 0, 0, 0.8, 0, 0, 0, 0.8, 0, 0, 0)
+billboard = 2
+shaded = true
+texture_filter = 1
+texture = ExtResource("1_04krd")
+
+[node name="Area3D" type="Area3D" parent="." unique_id=581979104]
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="Area3D" unique_id=1038175945]
+shape = SubResource("BoxShape3D_61olr")

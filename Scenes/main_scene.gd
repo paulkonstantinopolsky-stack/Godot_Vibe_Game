@@ -1,6 +1,5 @@
 extends Node3D
 
-# --- ССЫЛКИ НА УЗЛЫ ---
 @onready var order_popup = $UILayer/Order_PopUp
 @onready var env_back = $UILayer/Order_PopUp/EnvelopeBack
 @onready var env_front = $UILayer/Order_PopUp/EnvelopeFront
@@ -11,7 +10,6 @@ extends Node3D
 @onready var side_widget = $UILayer/SideWidget
 @onready var backpack_widget = $UILayer/BackpackWidget
 @onready var drag_preview = $UILayer/DragPreview
-
 @onready var autofill_button = get_node_or_null("UILayer/AutofillButton")
 
 @export_group("Ссылки на объекты")
@@ -64,19 +62,19 @@ var drag_start_pos: Vector2 = Vector2.ZERO
 var fly_tween: Tween 
 const DRAG_THRESHOLD: float = 15.0 
 
+var cinematic_queue: int = 0
+var is_cinematic_playing: bool = false
+var is_autofill_animating: bool = false
+
 func _ready():
 	if start_button: start_button.pressed.connect(_on_start_pressed)
 	if ready_button: ready_button.pressed.connect(_on_ready_pressed)
-	
 	if autofill_button:
 		autofill_button.pressed.connect(_on_autofill_pressed)
 		autofill_button.hide()
 	
-	ready_button.modulate.a = 0.0
-	ready_button.hide()
-	env_back.modulate.a = 0.0
-	env_front.modulate.a = 0.0
-	letter.modulate.a = 0.0
+	ready_button.modulate.a = 0.0; ready_button.hide()
+	env_back.modulate.a = 0.0; env_front.modulate.a = 0.0; letter.modulate.a = 0.0
 	
 	if side_widget: side_widget.hide()
 	if backpack_widget: backpack_widget.hide()
@@ -84,18 +82,30 @@ func _ready():
 	if cabinet: cabinet.hide()
 		
 	ItemManager.item_pressed.connect(_on_item_pressed)
+	
+	# Замыкаем цепь комбо-системы
+	if not ItemManager.bonus_cell_unlocked.is_connected(_on_bonus_cell_unlocked):
+		ItemManager.bonus_cell_unlocked.connect(_on_bonus_cell_unlocked)
+
+func _on_bonus_cell_unlocked():
+	cinematic_queue += 1
 
 func _process(delta):
 	if is_timer_active and time_left > 0:
 		time_left -= delta
-		if timer_label:
-			timer_label.text = str(ceil(time_left)) + "s"
-		if time_left <= 0:
-			_on_timer_timeout()
+		if timer_label: timer_label.text = str(ceil(time_left)) + "s"
+		if time_left <= 0: _on_timer_timeout()
+			
+	if cinematic_queue > 0 and not is_cinematic_playing and not ItemManager.is_dragging_item and not is_autofill_animating:
+		_play_next_cinematic()
 
-# ==========================================================
-# --- ЛОГИКА АВТО-СБОРКИ И АНИМАЦИЙ ПОЛЕТА ---
-# ==========================================================
+func _play_next_cinematic():
+	is_cinematic_playing = true
+	cinematic_queue -= 1
+	if cabinet and cabinet.has_method("reveal_next_bonus_cell"):
+		cabinet.reveal_next_bonus_cell(func(): is_cinematic_playing = false)
+	else:
+		is_cinematic_playing = false
 
 func _find_cabinet_item_node(parent_node: Node, target_id: int) -> Node3D:
 	if parent_node == null: return null
@@ -107,87 +117,65 @@ func _find_cabinet_item_node(parent_node: Node, target_id: int) -> Node3D:
 	return null
 
 func _on_autofill_pressed():
-	if not is_game_started or not backpack_widget: return
+	if not is_game_started or not backpack_widget or is_cinematic_playing or is_autofill_animating: return
 	if ItemManager.is_dragging_item or backpack_widget.is_dragging_internal: return
 
 	var required_ids = []
 	for task in ItemManager.current_order:
-		if not task["found"]:
-			required_ids.append(task["id"])
+		if not task["found"]: required_ids.append(task["id"])
 
 	if required_ids.size() == 0: return
-
 	var placements = backpack_widget.auto_fill_and_optimize(required_ids)
-	if placements.size() == 0: return # Если места не хватило, отменяем анимацию
+	if placements.size() == 0: return 
+	
+	is_autofill_animating = true
 
-	# 1. Собираем данные и сортируем предметы по высоте полки
 	var fly_data_array = []
 	for place_data in placements:
 		var id = place_data["id"]
 		var cab_node = _find_cabinet_item_node(cabinet, id)
 		fly_data_array.append({
-			"id": id,
-			"cell": place_data["cell"],
-			"cab_node": cab_node,
+			"id": id, "cell": place_data["cell"], "cab_node": cab_node,
 			"start_y": cab_node.global_position.y if cab_node else -9999.0
 		})
 
-	# Сортируем: сверху вниз (чем больше Y, тем выше полка)
 	fly_data_array.sort_custom(func(a, b): return a["start_y"] > b["start_y"])
 
-	# 2. Плавное вращение шкафа на 720 градусов
 	var total_anim_time = 1.0 + (fly_data_array.size() * 0.15)
 	if cabinet:
 		var cab_tw = create_tween().set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
 		cab_tw.tween_property(cabinet, "rotation_degrees:y", cabinet.rotation_degrees.y + 720.0, total_anim_time)
 
-	# 3. Каскадный запуск иконок в рюкзак
 	var cam = get_viewport().get_camera_3d()
-
 	for i in range(fly_data_array.size()):
 		var data = fly_data_array[i]
-		var id = data["id"]
-		var target_cell = data["cell"]
-		var cab_node = data["cab_node"]
+		var id = data["id"]; var target_cell = data["cell"]; var cab_node = data["cab_node"]
 
 		ItemManager.mark_item_as_found(id)
 
 		var tex_path = ItemManager.items_db[id]["texture"]
 		var fly_icon = TextureRect.new()
-		fly_icon.texture = load(tex_path)
-		fly_icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		fly_icon.texture = load(tex_path); fly_icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 		fly_icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-		fly_icon.size = target_cell.size
-		fly_icon.pivot_offset = fly_icon.size / 2.0
-		fly_icon.z_index = 100
-		fly_icon.modulate.a = 0.0 # Делаем невидимой до момента старта
+		fly_icon.size = target_cell.size; fly_icon.pivot_offset = fly_icon.size / 2.0
+		fly_icon.z_index = 100; fly_icon.modulate.a = 0.0 
 		$UILayer.add_child(fly_icon)
 
-		var target_pos = target_cell.global_position
-		var target_rot = target_cell.get_meta("rot_deg", 0)
+		var target_pos = target_cell.global_position; var target_rot = target_cell.get_meta("rot_deg", 0)
 
-		# Ждем свою очередь, затем вылетаем
 		var start_tw = create_tween()
 		start_tw.tween_interval(i * 0.15)
 		start_tw.tween_callback(func():
 			var start_pos = get_viewport().get_visible_rect().size / 2.0
-			
 			if cab_node:
-				# Прячем модельку на полке
 				if cab_node.has_method("hide_item"): cab_node.hide_item()
 				else: cab_node.hide()
-				
-				# Берем проекцию прямо с вращающегося шкафа!
 				if cam: start_pos = cam.unproject_position(cab_node.global_position)
 			
-			# Показываем 2D иконку и запускаем её
-			fly_icon.global_position = start_pos - (fly_icon.size / 2.0)
-			fly_icon.modulate.a = 1.0
-			
+			fly_icon.global_position = start_pos - (fly_icon.size / 2.0); fly_icon.modulate.a = 1.0
 			var anim_tw = create_tween().set_parallel(true).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
 			anim_tw.tween_property(fly_icon, "global_position", target_pos, 0.4)
 			anim_tw.tween_property(fly_icon, "rotation_degrees", target_rot, 0.4)
-			
 			anim_tw.chain().tween_callback(func():
 				fly_icon.queue_free()
 				if is_instance_valid(target_cell) and target_cell.has_node("ItemIcon"):
@@ -195,38 +183,32 @@ func _on_autofill_pressed():
 			)
 		)
 
-	# 4. Плавно прячем кнопку Авто-сборки
 	if autofill_button:
 		var tw = create_tween().set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
 		tw.tween_property(autofill_button, "modulate:a", 0.0, 0.3)
 		tw.tween_callback(autofill_button.hide)
-
-# ==========================================================
-# --- ОСТАЛЬНОЙ КОД ---
-# ==========================================================
+		
+	get_tree().create_timer(total_anim_time).timeout.connect(func(): is_autofill_animating = false)
 
 func _on_item_pressed(id: int, tex: String, node: Node3D):
-	potential_drag_id = id
-	potential_drag_tex = tex
-	potential_drag_node = node
+	if is_cinematic_playing: return 
+	potential_drag_id = id; potential_drag_tex = tex; potential_drag_node = node
 	drag_start_pos = get_viewport().get_mouse_position()
 
 func _input(event):
+	if is_cinematic_playing: return 
+	
 	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and not event.pressed:
 		if potential_drag_id != -1:
-			if ItemManager.is_dragging_item:
-				_perform_drop()
-			else:
-				_reset_drag_instant() 
+			if ItemManager.is_dragging_item: _perform_drop()
+			else: _reset_drag_instant() 
 
 	if event is InputEventMouseMotion and potential_drag_id != -1:
 		if not ItemManager.is_dragging_item:
 			var diff = event.position - drag_start_pos
 			if diff.length() > DRAG_THRESHOLD:
-				if abs(diff.y) > abs(diff.x):
-					_start_drag() 
-				else:
-					_reset_drag_instant() 
+				if abs(diff.y) > abs(diff.x): _start_drag() 
+				else: _reset_drag_instant() 
 		else:
 			if backpack_widget and backpack_widget.has_method("update_external_drag_preview"):
 				backpack_widget.update_external_drag_preview(event.position)
@@ -246,7 +228,6 @@ func _perform_drop():
 	if backpack_widget and backpack_widget.get_global_rect().has_point(mouse_pos):
 		if backpack_widget.has_method("try_add_item"):
 			dropped_successfully = backpack_widget.try_add_item(potential_drag_id, mouse_pos, potential_drag_node)
-			
 	if dropped_successfully: current_drag_node = null; _reset_drag_instant() 
 	else: _fly_back_and_cancel() 
 
@@ -258,7 +239,6 @@ func _fly_back_and_cancel():
 		drag_preview.size = drag_preview.texture.get_size() if drag_preview.texture else Vector2.ZERO
 		drag_preview.global_position = get_viewport().get_mouse_position() - (drag_preview.size / 2.0)
 		drag_preview.show()
-		
 		fly_tween = create_tween().set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
 		var target_pos = drag_start_pos - (drag_preview.size / 2.0)
 		fly_tween.tween_property(drag_preview, "global_position", target_pos, 0.3)
@@ -267,8 +247,7 @@ func _fly_back_and_cancel():
 	potential_drag_id = -1; potential_drag_node = null; ItemManager.is_dragging_item = false
 
 func _reset_drag_instant():
-	potential_drag_id = -1; potential_drag_node = null; ItemManager.is_dragging_item = false
-	_hide_preview_only()
+	potential_drag_id = -1; potential_drag_node = null; ItemManager.is_dragging_item = false; _hide_preview_only()
 
 func _hide_preview_only():
 	if backpack_widget and backpack_widget.has_method("hide_external_drag_preview"): backpack_widget.hide_external_drag_preview()
@@ -316,9 +295,7 @@ func start_game_flow():
 	outro.chain().tween_callback(func(): 
 		if side_widget: side_widget.start_appear_animation()
 		if backpack_widget: backpack_widget.start_appear_animation() 
-		if autofill_button:
-			autofill_button.modulate.a = 1.0
-			autofill_button.show()
+		if autofill_button: autofill_button.modulate.a = 1.0; autofill_button.show()
 	)
 
 func fly_back_to_cabinet(item_id: int, start_pos: Vector2, drag_node: Node3D):

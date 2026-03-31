@@ -1,0 +1,69 @@
+extends Node3D
+
+var is_collected = false
+var is_unlocked = false
+
+func _ready():
+	if has_node("Area3D"):
+		$Area3D.input_event.connect(_on_input_event)
+
+func unlock():
+	is_unlocked = true
+
+func _on_input_event(_camera, event, _position, _normal, _shape_idx):
+	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and event.pressed:
+		if is_unlocked and not is_collected:
+			is_collected = true
+			call_deferred("collect_coin")
+
+func collect_coin():
+	if not is_inside_tree(): return
+	
+	var main_scene = get_tree().current_scene
+	
+	# НАДЕЖНЫЙ ПОИСК (БЕЗ ГРУПП): Идем вверх по родителям, пока не найдем скрипт шкафа
+	var cabinet_node = get_parent()
+	while cabinet_node != null and not cabinet_node.has_method("reveal_next_bonus_cell"):
+		cabinet_node = cabinet_node.get_parent()
+	
+	if cabinet_node == null:
+		printerr("ОШИБКА: Шкаф не найден! Анимация отменена.")
+		is_collected = false
+		return
+
+	# Вычисляем направление от центра шкафа к монетке (только по XZ).
+	var direction_out = global_position - cabinet_node.global_position
+	direction_out.y = 0
+	# Fallback: если монета почти в центре шкафа, берем "вперед" локальной ячейки.
+	if direction_out.length_squared() < 0.0001:
+		direction_out = -global_basis.z
+		direction_out.y = 0
+	direction_out = direction_out.normalized()
+	
+	# Делаем заметный "выстрел" наружу.
+	var out_distance = 1.2
+	var final_out_pos = global_position + (direction_out * out_distance)
+	
+	var tw = create_tween().set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+	
+	# Отрываем от шкафа
+	tw.tween_callback(func():
+		var old_global_transform = global_transform
+		if get_parent():
+			get_parent().remove_child(self)
+		main_scene.add_child(self)
+		global_transform = old_global_transform
+	)
+
+	# Шаг 1: Быстро выдвигаем из ячейки
+	tw.tween_property(self, "global_position", final_out_pos, 0.18)
+	
+	tw.tween_interval(0.1)
+	
+	# Шаг 2: Летим вверх с вращением
+	var spin_degrees = 360.0 
+	var up_distance = 10.0
+	tw.parallel().tween_property(self, "global_position:y", final_out_pos.y + up_distance, 1.2)
+	tw.parallel().tween_property(self, "rotation_degrees:y", rotation_degrees.y + spin_degrees, 1.2).set_ease(Tween.EASE_IN_OUT)
+	
+	tw.tween_callback(queue_free)

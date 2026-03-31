@@ -1,6 +1,5 @@
 extends Node3D
 
-# --- ГЕОМЕТРИЯ (Константы) ---
 const COLUMNS: int = 8
 const STEP_ANGLE: float = deg_to_rad(45.0)
 const ROWS: int = 5
@@ -11,7 +10,6 @@ const CAP_FIT_RADIUS: float = 1.9
 const CAP_BOTTOM_Y: float = -1.3
 const CAP_TOP_Y_MARGIN: float = 0.0
 
-# --- НАСТРОЙКИ ДЛЯ ДВИЖКА ---
 @export_group("Параметры анимации")
 @export var cell_fly_duration: float = 1.2
 @export var spawn_distance_min: float = 15.0
@@ -41,7 +39,6 @@ const CAP_TOP_Y_MARGIN: float = 0.0
 @export var haptics_enabled: bool = true
 @export var haptic_click_ms: int = 10
 
-# --- СЛУЖЕБНЫЕ ПЕРЕМЕННЫЕ ---
 var can_rotate: bool = false
 var is_dragging: bool = false
 var is_swipe_confirmed: bool = false 
@@ -55,6 +52,8 @@ var red_cell_scene = preload("res://Scenes/Cell_Red.tscn")
 var green_cell_scene = preload("res://Scenes/Cell_Green.tscn")
 var cap_scene = preload("res://Scenes/Top_Down.tscn")
 var item_3d_scene = preload("res://Scenes/Item_3d.tscn")
+
+var active_red_cells = []
 
 func _ready() -> void:
 	hide()
@@ -73,7 +72,6 @@ func _process(delta: float) -> void:
 func _input(event: InputEvent) -> void:
 	if not can_rotate: return
 	
-	# 1. ЖЕЛЕЗОБЕТОННЫЙ СБРОС: Ловим отпускание мыши в первую очередь. Никаких прилипаний!
 	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and not event.pressed:
 		is_dragging = false
 		if is_swipe_confirmed:
@@ -82,41 +80,39 @@ func _input(event: InputEvent) -> void:
 		is_swipe_confirmed = false
 		return
 		
-	# 2. Если UI уже забрал предмет - шкаф стоит намертво
 	if ItemManager.is_dragging_item:
 		is_dragging = false
 		is_swipe_confirmed = false
 		return 
 	
-	# 3. Стандартный захват для вращения
 	if (event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT) or event is InputEventScreenTouch:
 		if event.pressed:
-			is_dragging = true
+			is_dragging = false 
 			is_swipe_confirmed = false
 			drag_start_pos_v = event.position
 			last_frame_x = event.position.x
 			angular_velocity = 0.0
 			_stop_snap()
 				
-	if is_dragging and (event is InputEventMouseMotion or event is InputEventScreenDrag):
-		# Если мы еще в мертвой зоне
-		if not is_swipe_confirmed:
-			var diff = event.position - drag_start_pos_v
-			if diff.length() > 15.0: # Порог (Deadzone)
-				if abs(diff.x) > abs(diff.y):
-					is_swipe_confirmed = true # Это свайп шкафа!
-					last_frame_x = event.position.x 
-				else:
-					is_dragging = false # Игрок потянул вниз, отдаем предмет главной сцене
-					return
-					
-		# Крутим шкаф только если вышли из мертвой зоны горизонтально
-		if is_swipe_confirmed:
-			var delta_x = event.position.x - last_frame_x
-			rotate_y(deg_to_rad(delta_x * sensitivity))
-			angular_velocity = deg_to_rad(delta_x / (1.0/60.0)) * 2.0
-			last_frame_x = event.position.x
-			_check_haptic_click()
+	if (event is InputEventMouseMotion or event is InputEventScreenDrag):
+		if Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT):
+			is_dragging = true
+			if not is_swipe_confirmed:
+				var diff = event.position - drag_start_pos_v
+				if diff.length() > 15.0: 
+					if abs(diff.x) > abs(diff.y):
+						is_swipe_confirmed = true 
+						last_frame_x = event.position.x 
+					else:
+						is_dragging = false 
+						return
+						
+			if is_swipe_confirmed:
+				var delta_x = event.position.x - last_frame_x
+				rotate_y(deg_to_rad(delta_x * sensitivity))
+				angular_velocity = deg_to_rad(delta_x / (1.0/60.0)) * 2.0
+				last_frame_x = event.position.x
+				_check_haptic_click()
 
 func _check_haptic_click() -> void:
 	if not haptics_enabled: return
@@ -143,6 +139,7 @@ func build_cabinet_tornado() -> void:
 		
 	show()
 	can_rotate = false
+	active_red_cells.clear()
 	
 	var spawn_list = []
 	for order_item in ItemManager.current_order:
@@ -152,9 +149,13 @@ func build_cabinet_tornado() -> void:
 		spawn_list.append(all_ids[randi() % all_ids.size()])
 	spawn_list.shuffle()
 	
+	var all_indices = []
+	for i in range(ROWS * COLUMNS): all_indices.append(i)
+	all_indices.shuffle()
+	var bonus_indices = all_indices.slice(0, 3)
+	
 	var tangential_max_width = 2.0 * BLENDER_RADIUS * tan(STEP_ANGLE / 2.0)
 	var target_scale_x = (tangential_max_width / manual_mesh_width) * width_scale
-	
 	var final_radial_position = BLENDER_RADIUS + geometric_radial_offset
 	var total_assembly_time = (ROWS * delay_between_rows) + (COLUMNS * delay_between_cells_in_row) + cell_fly_duration
 	
@@ -169,22 +170,28 @@ func build_cabinet_tornado() -> void:
 	for row in range(ROWS):
 		var current_row_delay = row * delay_between_rows
 		var row_y = float(row) * CELL_HEIGHT * VERTICAL_SPACING
-		var is_red_row: bool = (row % 2 == 0)
-		var target_red_index: int = randi() % COLUMNS if is_red_row else -1
 		
 		for i in range(COLUMNS):
+			var current_index = row * COLUMNS + i
+			var is_red = current_index in bonus_indices
+			
 			var angle: float = float(i) * STEP_ANGLE
 			var target_pos := Vector3(cos(angle) * final_radial_position, row_y, sin(angle) * final_radial_position)
 
-			var scene = green_cell_scene if not (is_red_row and i == target_red_index) else red_cell_scene
+			var cell
+			if is_red:
+				cell = red_cell_scene.instantiate()
+				active_red_cells.append({"cell": cell, "col": i})
+				# В красную ячейку предмет НЕ добавляем! Монетка там уже есть по умолчанию.
+			else:
+				cell = green_cell_scene.instantiate()
+				# В зелёную ячейку добавляем предмет
+				var item_node = item_3d_scene.instantiate()
+				cell.add_child(item_node)
+				item_node.setup(spawn_list[current_index])
+				item_node.position = Vector3(0, 0, 0.1)
 				
-			var cell = scene.instantiate() as Node3D
 			add_child(cell)
-			
-			var item_node = item_3d_scene.instantiate()
-			cell.add_child(item_node)
-			item_node.setup(spawn_list[row * COLUMNS + i])
-			item_node.position = Vector3(0, 0, 0.1)
 			
 			cell.scale = Vector3(0.001, 0.001, 0.001)
 			
@@ -201,6 +208,53 @@ func build_cabinet_tornado() -> void:
 				.set_trans(trans_type).set_ease(ease_type).set_delay(individual_delay)
 
 	_place_caps_sync(total_assembly_time)
+
+func reveal_next_bonus_cell(callback: Callable):
+	if active_red_cells.size() == 0:
+		callback.call()
+		return
+		
+	var data = active_red_cells.pop_front()
+	var cell = data["cell"]
+	var col: int = data["col"]
+	
+	_stop_snap()
+	can_rotate = false
+	is_dragging = false
+	angular_velocity = 0.0
+	
+	# Угол камеры относительно центра шкафа в XZ-плоскости.
+	var cam = get_viewport().get_camera_3d()
+	var cam_angle = PI / 2.0
+	if cam:
+		var to_cam = cam.global_position - global_position
+		to_cam.y = 0.0
+		if to_cam.length_squared() > 0.0001:
+			cam_angle = atan2(to_cam.z, to_cam.x)
+	
+	# Ячейка col стоит на цилиндре под локальным углом col * STEP_ANGLE.
+	# При rotation.y = R мировой угол ячейки = col_angle - R (из матрицы поворота Godot).
+	# Приравниваем к cam_angle: col_angle - R = cam_angle => R = col_angle - cam_angle.
+	var target_rot = float(col) * STEP_ANGLE - cam_angle
+	var diff = angle_difference(rotation.y, target_rot)
+	
+	if abs(diff) < deg_to_rad(5.0):
+		diff += TAU
+	
+	var final_angle = rotation.y + diff
+	
+	var tw = create_tween().set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
+	tw.tween_property(self, "rotation:y", final_angle, 1.2) 
+	tw.tween_callback(func():
+		if is_instance_valid(cell) and cell.has_method("open_doors"):
+			cell.open_doors()
+		
+		get_tree().create_timer(1.3).timeout.connect(func():
+			can_rotate = true
+			angular_velocity = 0.0
+			callback.call()
+		)
+	)
 
 func _place_caps_sync(duration: float) -> void:
 	if cap_scene == null: return

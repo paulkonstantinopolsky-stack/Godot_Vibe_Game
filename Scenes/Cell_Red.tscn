@@ -1,5 +1,12 @@
 [gd_scene format=3 uid="uid://dv4uyxsjervaw"]
 
 [ext_resource type="PackedScene" uid="uid://c3eiicv5o4gjf" path="res://Assets/Models/Cell_Doors_Red.glb" id="1_2ksmu"]
+[ext_resource type="Script" uid="uid://cdnuk81sq36cj" path="res://Scenes/cell_red.gd" id="2_ix4s1"]
+[ext_resource type="PackedScene" uid="uid://c4xobr0racgce" path="res://Scenes/Coin_3d.tscn" id="2_lh5i6"]
 
-[node name="Cell_Doors_Red" unique_id=1555266627 instance=ExtResource("1_2ksmu")]
+[node name="Cell_Doors_Red" unique_id=1555266627 node_paths=PackedStringArray("door_left", "door_right") instance=ExtResource("1_2ksmu")]
+script = ExtResource("2_ix4s1")
+door_left = NodePath("Cube/Plane_001")
+door_right = NodePath("Cube/Plane_002")
+
+[node name="Coin3D" parent="." index="0" unique_id=2000698399 instance=ExtResource("2_lh5i6")]

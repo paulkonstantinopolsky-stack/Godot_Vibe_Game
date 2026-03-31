@@ -117,7 +117,7 @@ func _clear_entire_grid():
 
 func _rotate_shape_normalized(shape: Array, rot_deg: int) -> Array:
 	if rot_deg == 0: return shape.duplicate()
-	var steps = int(rot_deg / 90) % 4
+	var steps = (rot_deg / 90) % 4
 	var current_shape = shape.duplicate()
 	for i in range(steps):
 		var next_shape = []
@@ -188,7 +188,7 @@ func _get_merged_stylebox(shape: Array, offset: Vector2, is_focused: bool, is_pr
 		style.border_width_top = 0; style.corner_radius_top_left = 0; style.corner_radius_top_right = 0
 	return style
 
-func _draw_merged_item(item_id: int, start_cell: Control, shape: Array, is_focused: bool):
+func _draw_merged_item(_item_id: int, start_cell: Control, shape: Array, is_focused: bool):
 	var h_sep = grid.get_theme_constant("h_separation")
 	var v_sep = grid.get_theme_constant("v_separation")
 	var spacing = Vector2(max(0, h_sep), max(0, v_sep))
@@ -436,7 +436,12 @@ func _on_btn_rotate():
 		active_cell.set_meta("rot_deg", int(old_rot + 90) % 360)
 		_update_grid_visuals()
 
-func _on_btn_confirm(): _close_edit_mode(); ItemManager.mark_item_as_found(active_item_id)
+func _on_btn_confirm():
+	if active_item_id == -1: return # Жесткий блок от двойных кликов
+	
+	var confirmed_id = active_item_id 
+	_close_edit_mode()                
+	ItemManager.mark_item_as_found(confirmed_id)
 
 func _on_btn_cancel():
 	var fly_pos = active_cell.global_position + (active_cell.size / 2.0)
