@@ -132,9 +132,9 @@ func _assign_random_shapes() -> void:
 		for item in current_order:
 			shapes_to_pack.append(assigned_shapes[item["id"]])
 
-		# Проверяем что формы вместятся — пробуем с перемешиванием порядка
-		# чтобы не было смещения в сторону «сначала большие»
-		shapes_to_pack.shuffle()
+		# Сортируем largest-first — точно так же как auto_fill_and_optimize,
+		# чтобы валидация и реальная расстановка использовали один и тот же порядок.
+		shapes_to_pack.sort_custom(func(a, b): return a.size() > b.size())
 		if _can_pack_greedy(shapes_to_pack):
 			# Применяем найденные формы
 			for id in assigned_shapes:
@@ -153,8 +153,16 @@ func _assign_random_shapes() -> void:
 		if not id in order_ids:
 			items_db[id]["shape"] = _ALL_SHAPES[randi() % _ALL_SHAPES.size()].duplicate()
 
-# Жадная проверка: пробуем разместить все формы по очереди в первый свободный слот
+# Жадная проверка: пробуем разместить все формы по очереди в первый свободный слот.
+# Дополнительно гарантируем, что предметы заказа занимают не менее 10 из 12 ячеек
+# → после правильной расстановки остаётся ≤2 клеток, и мусорные предметы туда не влезут.
 func _can_pack_greedy(shapes: Array) -> bool:
+	var total_cells: int = 0
+	for s in shapes:
+		total_cells += s.size()
+	if total_cells < 10:
+		return false  # Слишком мало — мусор может легко заполнить остаток
+
 	var grid: Dictionary = {}
 	for r in range(_BP_ROWS):
 		for c in range(_BP_COLS):

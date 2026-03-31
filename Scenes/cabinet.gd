@@ -56,6 +56,10 @@ var item_3d_scene = preload("res://Scenes/Item_3d.tscn")
 var active_red_cells = []
 var focus_tween: Tween
 var bonus_reveal_speed_multiplier: float = 1.0
+
+# --- Последовательность сбора монет ---
+var unlocked_coin_cols: Array = []  # Отсортированный список колонок с открытыми монетами
+var coin_seq_tween: Tween
 var bonus_post_open_delay_multiplier: float = 1.0
 var bonus_fixed_post_open_delay: float = -1.0
 
@@ -192,6 +196,7 @@ func build_cabinet_tornado() -> void:
 	show()
 	can_rotate = false
 	active_red_cells.clear()
+	unlocked_coin_cols.clear()
 	
 	var spawn_list = []
 	for order_item in ItemManager.current_order:
@@ -299,9 +304,14 @@ func reveal_next_bonus_cell(callback: Callable):
 	var tw = create_tween().set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
 	tw.tween_property(self, "rotation:y", final_angle, reveal_duration) 
 	tw.tween_callback(func():
-		if is_instance_valid(cell) and cell.has_method("open_doors"):
-			cell.open_doors()
-		
+		# Метаданные и регистрация — вне проверки open_doors,
+		# чтобы монетка всегда могла найти свою колонку.
+		if is_instance_valid(cell):
+			cell.set_meta("cabinet_col", col)
+			_register_coin_col(col)
+			if cell.has_method("open_doors"):
+				cell.open_doors()
+
 		get_tree().create_timer(post_open_delay).timeout.connect(func():
 			can_rotate = true
 			angular_velocity = 0.0
@@ -329,3 +339,53 @@ func _place_caps_sync(duration: float) -> void:
 	top.position = Vector3(0.0, top_y + 15.0, 0.0)
 	t.tween_property(top, "position", Vector3(0.0, top_y, 0.0), duration).set_trans(trans_type).set_ease(ease_type)
 	t.tween_property(top, "scale", cap_scale, duration).set_trans(trans_type).set_ease(ease_type)
+
+# =============================================================
+# ПОСЛЕДОВАТЕЛЬНОСТЬ СБОРА МОНЕТ (всегда слева направо)
+# =============================================================
+
+# Регистрируем открытую ячейку с монетой в порядке колонок
+func _register_coin_col(col: int) -> void:
+	if not col in unlocked_coin_cols:
+		unlocked_coin_cols.append(col)
+		unlocked_coin_cols.sort()  # Сортируем по возрастанию → слева направо
+
+# Вызывается из coin_3d.gd после завершения анимации сбора монеты.
+# Следующей всегда становится ячейка ПРАВЕЕ собранной (по возрастанию колонки),
+# а если правее ничего нет — переходим к крайней левой из оставшихся.
+func on_coin_collected(col: int) -> void:
+	var idx := unlocked_coin_cols.find(col)
+	if idx < 0:
+		return  # Монетка уже не в списке — ничего не делаем
+	unlocked_coin_cols.remove_at(idx)
+
+	if unlocked_coin_cols.is_empty():
+		# Все монеты собраны — отпускаем управление шкафом
+		can_rotate = true
+		angular_velocity = 0.0
+		return
+
+	# После удаления idx указывает ровно на следующую правую ячейку.
+	# Если были в конце списка — % оборачивает к крайней левой.
+	var next_col: int = unlocked_coin_cols[idx % unlocked_coin_cols.size()]
+	_rotate_to_coin_col(next_col)
+
+# Поворот к грани с монетой — всегда в положительном направлении (слева направо)
+func _rotate_to_coin_col(next_col: int) -> void:
+	can_rotate = false
+	_stop_snap()
+	if focus_tween and focus_tween.is_running(): focus_tween.kill()
+	if coin_seq_tween and coin_seq_tween.is_running(): coin_seq_tween.kill()
+	angular_velocity = 0.0
+
+	var cam_angle := _get_camera_angle_xz()
+	var target_rot := float(next_col) * STEP_ANGLE - cam_angle
+
+	# Положительный поворот (слева направо): используем wrapf в [0, TAU).
+	var diff := wrapf(target_rot - rotation.y, 0.0, TAU)
+	# Если уже смотрим на эту монетку — не крутим, игрок сразу видит её.
+	if diff < deg_to_rad(3.0):
+		return
+
+	coin_seq_tween = create_tween().set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
+	coin_seq_tween.tween_property(self, "rotation:y", rotation.y + diff, 0.7)
