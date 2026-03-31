@@ -110,10 +110,14 @@ func _clear_entire_grid():
 	var roots = []
 	for cell in grid.get_children():
 		if cell.has_node("ItemIcon"):
-			var r = cell.get_meta("root_cell", null)
-			if r and not roots.has(r): roots.append(r)
+			if not cell.has_meta("root_cell"):
+				continue
+			var r = cell.get_meta("root_cell")
+			if r and not roots.has(r):
+				roots.append(r)
 	for r in roots:
-		_clear_item_from_grid(r, r.get_meta("current_shape"))
+		if r and r.has_meta("current_shape"):
+			_clear_item_from_grid(r, r.get_meta("current_shape"))
 
 func _rotate_shape_normalized(shape: Array, rot_deg: int) -> Array:
 	if rot_deg == 0: return shape.duplicate()
