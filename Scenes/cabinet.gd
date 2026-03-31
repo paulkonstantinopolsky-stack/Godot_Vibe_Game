@@ -54,6 +54,7 @@ var cap_scene = preload("res://Scenes/Top_Down.tscn")
 var item_3d_scene = preload("res://Scenes/Item_3d.tscn")
 
 var active_red_cells = []
+var focus_tween: Tween
 var bonus_reveal_speed_multiplier: float = 1.0
 var bonus_post_open_delay_multiplier: float = 1.0
 var bonus_fixed_post_open_delay: float = -1.0
@@ -145,6 +146,45 @@ func _start_snap() -> void:
 func _stop_snap() -> void:
 	if snap_tween: snap_tween.kill()
 
+func _get_camera_angle_xz(default_angle: float = PI / 2.0) -> float:
+	var cam = get_viewport().get_camera_3d()
+	var cam_angle = default_angle
+	if cam:
+		var to_cam = cam.global_position - global_position
+		to_cam.y = 0.0
+		if to_cam.length_squared() > 0.0001:
+			cam_angle = atan2(to_cam.z, to_cam.x)
+	return cam_angle
+
+func focus_item_face_to_camera(item_node: Node3D, duration: float = 0.35, force: bool = false) -> void:
+	if item_node == null or not is_instance_valid(item_node):
+		return
+	var cell = item_node.get_parent()
+	if cell == null or not is_instance_valid(cell):
+		return
+	
+	var cell_pos = cell.global_position - global_position
+	cell_pos.y = 0.0
+	if cell_pos.length_squared() <= 0.0001:
+		return
+	
+	var col_world_angle = atan2(cell_pos.z, cell_pos.x)
+	var cam_angle = _get_camera_angle_xz()
+	var diff = wrapf(col_world_angle - cam_angle, -PI, PI)
+	
+	if not force and abs(diff) < deg_to_rad(8.0):
+		return
+	# При force=true всё равно не трогаем шкаф если он уже точно смотрит в камеру
+	if abs(diff) < deg_to_rad(0.5):
+		return
+
+	_stop_snap()
+	if focus_tween and focus_tween.is_running():
+		focus_tween.kill()
+	angular_velocity = 0.0
+	focus_tween = create_tween().set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+	focus_tween.tween_property(self, "rotation:y", rotation.y + diff, duration)
+
 func build_cabinet_tornado() -> void:
 	for child in get_children():
 		child.queue_free()
@@ -231,18 +271,15 @@ func reveal_next_bonus_cell(callback: Callable):
 	var col: int = data["col"]
 	
 	_stop_snap()
+	# Убиваем focus tween — иначе он будет конфликтовать с поворотом кинематики
+	if focus_tween and focus_tween.is_running():
+		focus_tween.kill()
 	can_rotate = false
 	is_dragging = false
 	angular_velocity = 0.0
 	
 	# Угол камеры относительно центра шкафа в XZ-плоскости.
-	var cam = get_viewport().get_camera_3d()
-	var cam_angle = PI / 2.0
-	if cam:
-		var to_cam = cam.global_position - global_position
-		to_cam.y = 0.0
-		if to_cam.length_squared() > 0.0001:
-			cam_angle = atan2(to_cam.z, to_cam.x)
+	var cam_angle = _get_camera_angle_xz()
 	
 	# Ячейка col стоит на цилиндре под локальным углом col * STEP_ANGLE.
 	# При rotation.y = R мировой угол ячейки = col_angle - R (из матрицы поворота Godot).

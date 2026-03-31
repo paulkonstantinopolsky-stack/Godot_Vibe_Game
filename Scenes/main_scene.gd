@@ -59,13 +59,16 @@ var potential_drag_tex: String = ""
 var potential_drag_node: Node3D = null 
 var current_drag_node: Node3D = null   
 var drag_start_pos: Vector2 = Vector2.ZERO
-var fly_tween: Tween 
+var fly_tween: Tween
+var inner_fly_tween: Tween
+var fly_back_gen: int = 0
 const DRAG_THRESHOLD: float = 15.0 
 
 var cinematic_queue: int = 0
 var is_cinematic_playing: bool = false
 var is_autofill_animating: bool = false
 var fast_cinematic_count: int = 0
+var autofill_cab_tween: Tween
 
 func _ready():
 	if start_button: start_button.pressed.connect(_on_start_pressed)
@@ -148,13 +151,18 @@ func _on_autofill_pressed():
 			"id": id, "cell": place_data["cell"], "cab_node": cab_node,
 			"start_y": cab_node.global_position.y if cab_node else -9999.0
 		})
+		# Сохраняем ссылку на 3D-узел чтобы fly_back_to_cabinet работал корректно
+		if cab_node and is_instance_valid(cab_node) and is_instance_valid(place_data["cell"]):
+			place_data["cell"].set_meta("source_drag_node", cab_node)
 
 	fly_data_array.sort_custom(func(a, b): return a["start_y"] > b["start_y"])
 
 	var total_anim_time = 1.0 + (fly_data_array.size() * 0.15)
 	if cabinet:
-		var cab_tw = create_tween().set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
-		cab_tw.tween_property(cabinet, "rotation_degrees:y", cabinet.rotation_degrees.y + 720.0, total_anim_time)
+		if autofill_cab_tween and autofill_cab_tween.is_running():
+			autofill_cab_tween.kill()
+		autofill_cab_tween = create_tween().set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
+		autofill_cab_tween.tween_property(cabinet, "rotation_degrees:y", cabinet.rotation_degrees.y + 720.0, total_anim_time)
 
 	var cam = get_viewport().get_camera_3d()
 	var queue_before = cinematic_queue
@@ -231,6 +239,8 @@ func _start_drag():
 	if fly_tween and fly_tween.is_running(): fly_tween.kill()
 	ItemManager.is_dragging_item = true
 	current_drag_node = potential_drag_node
+	if cabinet and cabinet.has_method("focus_item_face_to_camera") and current_drag_node and not is_cinematic_playing:
+		cabinet.focus_item_face_to_camera(current_drag_node, 0.35)
 	if current_drag_node and current_drag_node.has_method("hide_item"): current_drag_node.hide_item()
 	if drag_preview: drag_preview.hide() 
 	if backpack_widget and backpack_widget.has_method("show_external_drag_preview"):
@@ -246,18 +256,47 @@ func _perform_drop():
 	else: _fly_back_and_cancel() 
 
 func _fly_back_and_cancel():
+	if autofill_cab_tween and autofill_cab_tween.is_running(): autofill_cab_tween.kill()
+	if inner_fly_tween and inner_fly_tween.is_running(): inner_fly_tween.kill()
+	if fly_tween and fly_tween.is_running(): fly_tween.kill()
+	fly_back_gen += 1
+	var my_gen := fly_back_gen
 	if backpack_widget and backpack_widget.has_method("hide_external_drag_preview"): backpack_widget.hide_external_drag_preview()
+	var node_to_return = current_drag_node
 	if drag_preview:
 		drag_preview.texture = load(potential_drag_tex)
 		drag_preview.custom_minimum_size = Vector2.ZERO
 		drag_preview.size = drag_preview.texture.get_size() if drag_preview.texture else Vector2.ZERO
 		drag_preview.global_position = get_viewport().get_mouse_position() - (drag_preview.size / 2.0)
 		drag_preview.show()
+		# Шаг 1: поворачиваем шкаф к нужной грани (принудительно)
+		const FOCUS_DUR := 0.2
+		if cabinet and cabinet.has_method("focus_item_face_to_camera") and node_to_return and not is_cinematic_playing:
+			cabinet.focus_item_face_to_camera(node_to_return, FOCUS_DUR, true)
+		# Шаг 2: ждём поворота, вычисляем проекцию ПОСЛЕ поворота, летим
 		fly_tween = create_tween().set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
-		var target_pos = drag_start_pos - (drag_preview.size / 2.0)
-		fly_tween.tween_property(drag_preview, "global_position", target_pos, 0.3)
-		fly_tween.tween_callback(_hide_preview_only)
-	else: _hide_preview_only()
+		fly_tween.tween_interval(FOCUS_DUR)
+		fly_tween.tween_callback(func():
+			if my_gen != fly_back_gen: return  # Устарело — новый fly_back уже запущен
+			var cam = get_viewport().get_camera_3d()
+			var target_pos = drag_start_pos - (drag_preview.size / 2.0)
+			if cam and node_to_return and is_instance_valid(node_to_return):
+				target_pos = cam.unproject_position(node_to_return.global_position) - (drag_preview.size / 2.0)
+			inner_fly_tween = create_tween().set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+			inner_fly_tween.tween_property(drag_preview, "global_position", target_pos, 0.3)
+			inner_fly_tween.tween_callback(func():
+				if my_gen != fly_back_gen: return
+				drag_preview.hide(); drag_preview.texture = null
+				if node_to_return and is_instance_valid(node_to_return):
+					if node_to_return.has_method("show_item"): node_to_return.show_item()
+					else: node_to_return.show()
+			)
+		)
+	else:
+		if node_to_return and is_instance_valid(node_to_return):
+			if node_to_return.has_method("show_item"): node_to_return.show_item()
+			else: node_to_return.show()
+	current_drag_node = null
 	potential_drag_id = -1; potential_drag_node = null; ItemManager.is_dragging_item = false
 
 func _reset_drag_instant():
@@ -314,21 +353,41 @@ func start_game_flow():
 
 func fly_back_to_cabinet(item_id: int, start_pos: Vector2, drag_node: Node3D):
 	if item_id == -1: ItemManager.is_dragging_item = false; return
+	if autofill_cab_tween and autofill_cab_tween.is_running(): autofill_cab_tween.kill()
+	if inner_fly_tween and inner_fly_tween.is_running(): inner_fly_tween.kill()
+	if fly_tween and fly_tween.is_running(): fly_tween.kill()
+	fly_back_gen += 1
+	var my_gen := fly_back_gen
 	ItemManager.is_dragging_item = false
 	if drag_preview:
 		var tex_path = ItemManager.items_db[item_id]["texture"]
 		drag_preview.texture = load(tex_path); drag_preview.custom_minimum_size = Vector2.ZERO
 		drag_preview.size = drag_preview.texture.get_size() if drag_preview.texture else Vector2.ZERO
 		drag_preview.global_position = start_pos - (drag_preview.size / 2.0); drag_preview.show()
-		if fly_tween and fly_tween.is_running(): fly_tween.kill()
+
+		# Шаг 1: сразу поворачиваем шкаф нужной гранью к камере (принудительно, без порога)
+		const FOCUS_DURATION := 0.2
+		if cabinet and cabinet.has_method("focus_item_face_to_camera") and drag_node and not is_cinematic_playing:
+			cabinet.focus_item_face_to_camera(drag_node, FOCUS_DURATION, true)
+
+		# Шаг 2: ждём поворота, затем летим точно в проекцию 3D-ячейки
 		fly_tween = create_tween().set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
-		var target_pos = drag_start_pos - (drag_preview.size / 2.0)
-		fly_tween.tween_property(drag_preview, "global_position", target_pos, 0.3)
+		fly_tween.tween_interval(FOCUS_DURATION)
 		fly_tween.tween_callback(func():
-			drag_preview.hide(); drag_preview.texture = null
-			if drag_node:
-				if drag_node.has_method("show_item"): drag_node.show_item()
-				else: drag_node.show()
+			if my_gen != fly_back_gen: return  # Устарело — новый fly_back уже запущен
+			var cam = get_viewport().get_camera_3d()
+			var target_pos = drag_start_pos - (drag_preview.size / 2.0)
+			if cam and drag_node and is_instance_valid(drag_node):
+				target_pos = cam.unproject_position(drag_node.global_position) - (drag_preview.size / 2.0)
+			inner_fly_tween = create_tween().set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+			inner_fly_tween.tween_property(drag_preview, "global_position", target_pos, 0.3)
+			inner_fly_tween.tween_callback(func():
+				if my_gen != fly_back_gen: return
+				drag_preview.hide(); drag_preview.texture = null
+				if drag_node:
+					if drag_node.has_method("show_item"): drag_node.show_item()
+					else: drag_node.show()
+			)
 		)
 	else:
 		if drag_node:

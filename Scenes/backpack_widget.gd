@@ -50,8 +50,14 @@ func auto_fill_and_optimize(required_ids: Array) -> Array:
 					"old_rot": root.get_meta("rot_deg", 0)
 				})
 
+	# Сохраняем source_drag_node для существующих предметов до очистки сетки
+	var saved_drag_nodes: Dictionary = {}
+	for item in existing_items:
+		if item["old_root"].has_meta("source_drag_node"):
+			saved_drag_nodes[item["id"]] = item["old_root"].get_meta("source_drag_node")
+
 	var to_pack = []
-	for item in existing_items: to_pack.append({"id": item.id, "is_new": false})
+	for item in existing_items: to_pack.append({"id": item["id"], "is_new": false})
 	for id in required_ids: to_pack.append({"id": id, "is_new": true})
 
 	to_pack.sort_custom(func(a, b):
@@ -78,10 +84,14 @@ func auto_fill_and_optimize(required_ids: Array) -> Array:
 					_place_item_in_grid(cell, item_id, test_shape, r * 90)
 					placed = true
 					
-					if pack_item.is_new: 
+					if pack_item.is_new:
 						successfully_added_new.append({"id": item_id, "cell": cell})
 						# ВАЖНО: Прячем иконку! Она включится, когда долетит анимация из MainScene
 						cell.get_node("ItemIcon").hide()
+					else:
+						# Восстанавливаем ссылку на 3D-узел шкафа для существующих предметов
+						if saved_drag_nodes.has(item_id):
+							cell.set_meta("source_drag_node", saved_drag_nodes[item_id])
 					break
 
 		if not placed:
@@ -320,7 +330,8 @@ func _input(event):
 						_update_grid_visuals()
 						get_viewport().set_input_as_handled()
 					else:
-						_start_edit_mode(target_root, occupant_id, null, target_shape)
+						var saved_drag_node = target_root.get_meta("source_drag_node") if target_root.has_meta("source_drag_node") else null
+						_start_edit_mode(target_root, occupant_id, saved_drag_node, target_shape)
 						get_viewport().set_input_as_handled()
 				else:
 					if ItemManager.is_edit_mode and edit_menu and not edit_menu.get_global_rect().has_point(mouse_pos):
@@ -352,6 +363,8 @@ func try_add_item(item_id: int, mouse_pos: Vector2, drag_node: Node3D = null) ->
 	if not target_root: target_root = _find_first_free_slot(shape)
 	if target_root and _can_place_shape(target_root, shape):
 		_place_item_in_grid(target_root, item_id, shape, 0)
+		if drag_node:
+			target_root.set_meta("source_drag_node", drag_node)
 		_start_edit_mode(target_root, item_id, drag_node, shape)
 		return true
 	return false
@@ -388,6 +401,7 @@ func _clear_item_from_grid(root_cell: Control, shape: Array):
 		if cell: cell.remove_meta("occupied_by_id"); cell.remove_meta("root_cell")
 	root_cell.remove_meta("current_shape")
 	root_cell.remove_meta("rot_deg")
+	if root_cell.has_meta("source_drag_node"): root_cell.remove_meta("source_drag_node")
 	root_cell.get_node("ItemIcon").texture = null
 	root_cell.get_node("ItemIcon").hide()
 	_update_grid_visuals()
