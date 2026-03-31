@@ -54,6 +54,18 @@ var cap_scene = preload("res://Scenes/Top_Down.tscn")
 var item_3d_scene = preload("res://Scenes/Item_3d.tscn")
 
 var active_red_cells = []
+var bonus_reveal_speed_multiplier: float = 1.0
+var bonus_post_open_delay_multiplier: float = 1.0
+var bonus_fixed_post_open_delay: float = -1.0
+
+func set_bonus_reveal_speed_multiplier(mult: float) -> void:
+	bonus_reveal_speed_multiplier = max(mult, 0.01)
+
+func set_bonus_post_open_delay_multiplier(mult: float) -> void:
+	bonus_post_open_delay_multiplier = max(mult, 0.01)
+
+func set_bonus_fixed_post_open_delay(seconds: float) -> void:
+	bonus_fixed_post_open_delay = seconds
 
 func _ready() -> void:
 	hide()
@@ -243,13 +255,17 @@ func reveal_next_bonus_cell(callback: Callable):
 	
 	var final_angle = rotation.y + diff
 	
+	var reveal_duration = 1.2 / bonus_reveal_speed_multiplier
+	var post_open_delay = 1.3 / (bonus_reveal_speed_multiplier * bonus_post_open_delay_multiplier)
+	if bonus_fixed_post_open_delay >= 0.0:
+		post_open_delay = bonus_fixed_post_open_delay
 	var tw = create_tween().set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
-	tw.tween_property(self, "rotation:y", final_angle, 1.2) 
+	tw.tween_property(self, "rotation:y", final_angle, reveal_duration) 
 	tw.tween_callback(func():
 		if is_instance_valid(cell) and cell.has_method("open_doors"):
 			cell.open_doors()
 		
-		get_tree().create_timer(1.3).timeout.connect(func():
+		get_tree().create_timer(post_open_delay).timeout.connect(func():
 			can_rotate = true
 			angular_velocity = 0.0
 			callback.call()

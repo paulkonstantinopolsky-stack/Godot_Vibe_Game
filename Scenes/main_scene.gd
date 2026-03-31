@@ -65,6 +65,7 @@ const DRAG_THRESHOLD: float = 15.0
 var cinematic_queue: int = 0
 var is_cinematic_playing: bool = false
 var is_autofill_animating: bool = false
+var fast_cinematic_count: int = 0
 
 func _ready():
 	if start_button: start_button.pressed.connect(_on_start_pressed)
@@ -103,6 +104,15 @@ func _play_next_cinematic():
 	is_cinematic_playing = true
 	cinematic_queue -= 1
 	if cabinet and cabinet.has_method("reveal_next_bonus_cell"):
+		var use_fast = fast_cinematic_count > 0
+		if use_fast:
+			fast_cinematic_count -= 1
+		if cabinet.has_method("set_bonus_reveal_speed_multiplier"):
+			cabinet.set_bonus_reveal_speed_multiplier(2.0 if use_fast else 1.0)
+		if cabinet.has_method("set_bonus_post_open_delay_multiplier"):
+			cabinet.set_bonus_post_open_delay_multiplier(2.0 if use_fast else 1.0)
+		if cabinet.has_method("set_bonus_fixed_post_open_delay"):
+			cabinet.set_bonus_fixed_post_open_delay(0.25 if use_fast else -1.0)
 		cabinet.reveal_next_bonus_cell(func(): is_cinematic_playing = false)
 	else:
 		is_cinematic_playing = false
@@ -147,6 +157,7 @@ func _on_autofill_pressed():
 		cab_tw.tween_property(cabinet, "rotation_degrees:y", cabinet.rotation_degrees.y + 720.0, total_anim_time)
 
 	var cam = get_viewport().get_camera_3d()
+	var queue_before = cinematic_queue
 	for i in range(fly_data_array.size()):
 		var data = fly_data_array[i]
 		var id = data["id"]; var target_cell = data["cell"]; var cab_node = data["cab_node"]
@@ -182,6 +193,9 @@ func _on_autofill_pressed():
 					target_cell.get_node("ItemIcon").show()
 			)
 		)
+	var added_cinematics = cinematic_queue - queue_before
+	if added_cinematics > 0:
+		fast_cinematic_count += added_cinematics
 
 	if autofill_button:
 		var tw = create_tween().set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
