@@ -7,4 +7,4 @@
 script = ExtResource("1_itmdt")
 id = 4
 texture = ExtResource("2_txtr")
-shape_type = 1
+shape_type = 0

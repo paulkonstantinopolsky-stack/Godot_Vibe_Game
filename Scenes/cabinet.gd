@@ -29,30 +29,28 @@ const CAP_TOP_Y_MARGIN: float = 0.0
 @export var trans_type: Tween.TransitionType = Tween.TRANS_CUBIC
 @export var ease_type: Tween.EaseType = Tween.EASE_OUT
 
-@export_group("Интерактив (iOS Style)")
-@export var sensitivity: float = 0.2
-@export var throw_momentum_factor: float = 1.5
-@export var friction: float = 0.94
-@export var snap_velocity_limit: float = 0.08
+@export_group("Inertia Physics")
+@export var swipe_sensitivity: float = 0.5
+@export var max_angular_velocity: float = 25.0
+@export var friction: float = 3.0
+@export var snap_threshold: float = 3.0
+@export var snap_duration: float = 0.25
+@export var face_angle_step: float = 45.0
 
 @export_group("Хаптик (Сейф)")
 @export var haptics_enabled: bool = true
 @export var haptic_click_ms: int = 10
 
-const DRAG_DEADZONE: float = 15.0
-const FLICK_THRESHOLD: float = 600.0   # пикс/сек — быстрее → шкаф перелетает к следующей грани
-const FLICK_MAX_FACES: int = 3         # макс. граней за один флик
+const SNAP_ANGLE_EPS: float = 0.01
 
 var can_rotate: bool = false
 var is_dragging: bool = false
-var is_swipe_confirmed: bool = false
-var drag_start_pos_v: Vector2 = Vector2.ZERO
+## Скорость в градусах за кадр (_physics-like для инерции)
 var angular_velocity: float = 0.0
-var last_frame_x: float = 0.0
+## Текущий yaw в градусах (синхрон с rotation_degrees.y)
+var current_rotation_y: float = 0.0
 var snap_tween: Tween
 var last_haptic_index: int = 0
-var _accumulated_drag: float = 0.0
-var _recent_velocities: Array = []
 
 var red_cell_scene = preload("res://Scenes/Cell_Red.tscn")
 var green_cell_scene = preload("res://Scenes/Cell_Green.tscn")
@@ -81,121 +79,103 @@ func set_bonus_fixed_post_open_delay(seconds: float) -> void:
 func _ready() -> void:
 	hide()
 
-func _process(_delta: float) -> void:
-	if not can_rotate: return
+func _process(delta: float) -> void:
+	if not can_rotate:
+		return
+
 	if snap_tween and snap_tween.is_running():
+		current_rotation_y = rotation_degrees.y
 		_check_haptic_click()
+		return
+
+	if is_dragging:
+		return
+
+	if abs(angular_velocity) > snap_threshold:
+		current_rotation_y += angular_velocity
+		rotation_degrees.y = current_rotation_y
+		angular_velocity = lerpf(angular_velocity, 0.0, friction * delta)
+		_check_haptic_click()
+	else:
+		angular_velocity = 0.0
+		var target_y: float = round(current_rotation_y / face_angle_step) * face_angle_step
+		if abs(target_y - current_rotation_y) > SNAP_ANGLE_EPS:
+			_begin_snap_to_face(target_y)
 
 func _input(event: InputEvent) -> void:
-	if not can_rotate: return
-
-	# === RELEASE (mouse + touch) ===
-	var is_release := false
-	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and not event.pressed:
-		is_release = true
-	if event is InputEventScreenTouch and not event.pressed:
-		is_release = true
-	if is_release:
-		is_dragging = false
-		if is_swipe_confirmed:
-			_snap_with_inertia()
-		is_swipe_confirmed = false
+	if not can_rotate:
 		return
 
-	# Если идёт перетаскивание предмета из шкафа в рюкзак — не вращаем
 	if ItemManager.is_dragging_item:
-		is_dragging = false
-		is_swipe_confirmed = false
+		if event is InputEventMouseButton or event is InputEventScreenTouch:
+			if not event.pressed:
+				is_dragging = false
 		return
 
-	# === PRESS ===
-	if (event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT) \
-		or event is InputEventScreenTouch:
+	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
 		if event.pressed:
+			_on_rotate_grab()
+		else:
 			is_dragging = false
-			is_swipe_confirmed = false
-			drag_start_pos_v = event.position
-			last_frame_x = event.position.x
-			_accumulated_drag = 0.0
-			_recent_velocities.clear()
-			angular_velocity = 0.0
-			_stop_snap()
+		return
 
-	# === DRAG / MOTION ===
-	if event is InputEventMouseMotion or event is InputEventScreenDrag:
+	if event is InputEventScreenTouch:
+		if event.pressed:
+			_on_rotate_grab()
+		else:
+			is_dragging = false
+		return
+
+	if not is_dragging:
+		return
+
+	if event is InputEventMouseMotion:
 		if not Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT):
 			return
-		is_dragging = true
+		_apply_direct_rotation(event.relative.x)
+	elif event is InputEventScreenDrag:
+		_apply_direct_rotation(event.relative.x)
 
-		if not is_swipe_confirmed:
-			_accumulated_drag += abs(event.relative.x) + abs(event.relative.y)
-			if _accumulated_drag >= DRAG_DEADZONE:
-				var diff = event.position - drag_start_pos_v
-				if abs(diff.x) > abs(diff.y):
-					is_swipe_confirmed = true
-					last_frame_x = event.position.x
-				else:
-					is_dragging = false
-					return
+func _on_rotate_grab() -> void:
+	is_dragging = true
+	angular_velocity = 0.0
+	_stop_snap()
+	current_rotation_y = rotation_degrees.y
 
-		if is_swipe_confirmed:
-			var delta_x = event.position.x - last_frame_x
-			rotate_y(deg_to_rad(delta_x * sensitivity))
-			last_frame_x = event.position.x
+func _apply_direct_rotation(rel_x: float) -> void:
+	var delta_rot: float = rel_x * swipe_sensitivity
+	current_rotation_y += delta_rot
+	rotation_degrees.y = current_rotation_y
+	angular_velocity = rel_x * swipe_sensitivity
+	angular_velocity = clampf(angular_velocity, -max_angular_velocity, max_angular_velocity)
+	_check_haptic_click()
 
-			var dt := get_process_delta_time()
-			if dt > 0.0:
-				_recent_velocities.append(delta_x / dt)
-				if _recent_velocities.size() > 5:
-					_recent_velocities.remove_at(0)
-
-			_check_haptic_click()
+func _begin_snap_to_face(target_y: float) -> void:
+	_stop_snap()
+	snap_tween = create_tween()
+	snap_tween.set_parallel(true)
+	snap_tween.tween_property(self, "current_rotation_y", target_y, snap_duration)\
+		.set_trans(Tween.TRANS_QUART).set_ease(Tween.EASE_OUT)
+	snap_tween.tween_property(self, "rotation_degrees:y", target_y, snap_duration)\
+		.set_trans(Tween.TRANS_QUART).set_ease(Tween.EASE_OUT)
+	snap_tween.finished.connect(func():
+		current_rotation_y = rotation_degrees.y
+		_check_haptic_click()
+	)
 
 func _check_haptic_click() -> void:
-	if not haptics_enabled: return
-	var current_index = int(round(rotation.y / STEP_ANGLE))
+	if not haptics_enabled:
+		return
+	var step: float = maxf(face_angle_step, 0.001)
+	var current_index: int = int(round(rotation_degrees.y / step))
 	if current_index != last_haptic_index:
 		Input.vibrate_handheld(haptic_click_ms)
 		last_haptic_index = current_index
 
-func _start_snap() -> void:
-	var target_rot = round(rotation.y / STEP_ANGLE) * STEP_ANGLE
-	if abs(rotation.y - target_rot) < 0.001: return
-	_stop_snap()
-	snap_tween = create_tween()
-	snap_tween.tween_property(self, "rotation:y", target_rot, 0.4).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
-	snap_tween.finished.connect(func(): _check_haptic_click())
-	angular_velocity = 0.0
-
 func _stop_snap() -> void:
-	if snap_tween: snap_tween.kill()
-
-func _snap_with_inertia() -> void:
-	var avg_vel: float = 0.0
-	if _recent_velocities.size() > 0:
-		for v in _recent_velocities:
-			avg_vel += v
-		avg_vel /= _recent_velocities.size()
-	_recent_velocities.clear()
-
-	# Сколько граней пропустить по инерции
-	var face_offset: int = 0
-	if abs(avg_vel) > FLICK_THRESHOLD:
-		face_offset = clampi(int(avg_vel / FLICK_THRESHOLD), -FLICK_MAX_FACES, FLICK_MAX_FACES)
-
-	var nearest: float = round(rotation.y / STEP_ANGLE) * STEP_ANGLE
-	var target: float = nearest + float(face_offset) * STEP_ANGLE
-
-	# Длительность зависит от расстояния, но с ограничениями
-	var angle_dist: float = abs(target - rotation.y)
-	var duration := clampf(angle_dist / deg_to_rad(90.0) * 0.3, 0.15, 0.5)
-
-	angular_velocity = 0.0
-	_stop_snap()
-	snap_tween = create_tween()
-	snap_tween.tween_property(self, "rotation:y", target, duration)\
-		.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
-	snap_tween.finished.connect(func(): _check_haptic_click())
+	if snap_tween != null:
+		snap_tween.kill()
+	snap_tween = null
 
 func _get_camera_angle_xz(default_angle: float = PI / 2.0) -> float:
 	var cam = get_viewport().get_camera_3d()
@@ -233,8 +213,10 @@ func focus_item_face_to_camera(item_node: Node3D, duration: float = 0.35, force:
 	if focus_tween and focus_tween.is_running():
 		focus_tween.kill()
 	angular_velocity = 0.0
+	var target_deg: float = rad_to_deg(rotation.y + diff)
 	focus_tween = create_tween().set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
-	focus_tween.tween_property(self, "rotation:y", rotation.y + diff, duration)
+	focus_tween.tween_property(self, "rotation_degrees:y", target_deg, duration)
+	focus_tween.finished.connect(func(): current_rotation_y = rotation_degrees.y)
 
 func build_cabinet_tornado() -> void:
 	for child in get_children():
@@ -270,13 +252,17 @@ func build_cabinet_tornado() -> void:
 	var final_radial_position = BLENDER_RADIUS + geometric_radial_offset
 	var total_assembly_time = (ROWS * delay_between_rows) + (COLUMNS * delay_between_cells_in_row) + cell_fly_duration
 	
-	rotation.y = 0
+	current_rotation_y = 0.0
+	rotation_degrees.y = 0.0
 	last_haptic_index = 0
-	
+
 	var cabinet_tween = create_tween()
-	cabinet_tween.tween_property(self, "rotation:y", deg_to_rad(total_rotation_degrees), total_assembly_time)\
+	cabinet_tween.tween_property(self, "rotation_degrees:y", total_rotation_degrees, total_assembly_time)\
 		.set_trans(trans_type).set_ease(ease_type)
-	cabinet_tween.finished.connect(func(): can_rotate = true)
+	cabinet_tween.finished.connect(func():
+		can_rotate = true
+		current_rotation_y = rotation_degrees.y
+	)
 	
 	for row in range(ROWS):
 		var current_row_delay = row * delay_between_rows
@@ -299,7 +285,9 @@ func build_cabinet_tornado() -> void:
 				# В зелёную ячейку добавляем предмет
 				var item_node = item_3d_scene.instantiate()
 				cell.add_child(item_node)
-				item_node.setup(spawn_list[current_index])
+				var sid: int = spawn_list[current_index]
+				item_node.setup(sid)
+				item_node.set_meta("puzzle_shape", ItemManager.get_shape_for_instance(sid))
 				item_node.position = Vector3(0, 0, 0.1)
 				
 			add_child(cell)
@@ -349,15 +337,17 @@ func reveal_next_bonus_cell(callback: Callable):
 	if abs(diff) < deg_to_rad(5.0):
 		diff += TAU
 	
-	var final_angle = rotation.y + diff
-	
+	var final_angle_rad: float = rotation.y + diff
+	var final_deg: float = rad_to_deg(final_angle_rad)
+
 	var reveal_duration = 1.2 / bonus_reveal_speed_multiplier
 	var post_open_delay = 1.3 / (bonus_reveal_speed_multiplier * bonus_post_open_delay_multiplier)
 	if bonus_fixed_post_open_delay >= 0.0:
 		post_open_delay = bonus_fixed_post_open_delay
 	var tw = create_tween().set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
-	tw.tween_property(self, "rotation:y", final_angle, reveal_duration) 
+	tw.tween_property(self, "rotation_degrees:y", final_deg, reveal_duration)
 	tw.tween_callback(func():
+		current_rotation_y = rotation_degrees.y
 		# Метаданные и регистрация — вне проверки open_doors,
 		# чтобы монетка всегда могла найти свою колонку.
 		if is_instance_valid(cell):
@@ -369,6 +359,7 @@ func reveal_next_bonus_cell(callback: Callable):
 		get_tree().create_timer(post_open_delay).timeout.connect(func():
 			can_rotate = true
 			angular_velocity = 0.0
+			current_rotation_y = rotation_degrees.y
 			callback.call()
 		)
 	)
@@ -441,5 +432,7 @@ func _rotate_to_coin_col(next_col: int) -> void:
 	if diff < deg_to_rad(3.0):
 		return
 
+	var target_coin_deg: float = rad_to_deg(rotation.y + diff)
 	coin_seq_tween = create_tween().set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
-	coin_seq_tween.tween_property(self, "rotation:y", rotation.y + diff, 0.7)
+	coin_seq_tween.tween_property(self, "rotation_degrees:y", target_coin_deg, 0.7)
+	coin_seq_tween.finished.connect(func(): current_rotation_y = rotation_degrees.y)

@@ -242,9 +242,18 @@ func _start_drag():
 	if cabinet and cabinet.has_method("focus_item_face_to_camera") and current_drag_node and not is_cinematic_playing:
 		cabinet.focus_item_face_to_camera(current_drag_node, 0.35)
 	if current_drag_node and current_drag_node.has_method("hide_item"): current_drag_node.hide_item()
-	if drag_preview: drag_preview.hide() 
+	if drag_preview: drag_preview.hide()
 	if backpack_widget and backpack_widget.has_method("show_external_drag_preview"):
-		backpack_widget.show_external_drag_preview(potential_drag_id, get_viewport().get_mouse_position())
+		var shape_to_draw: Array
+		if current_drag_node and current_drag_node.has_meta("puzzle_shape"):
+			shape_to_draw = current_drag_node.get_meta("puzzle_shape")
+		else:
+			shape_to_draw = ItemManager.items_db[potential_drag_id].get("shape", [Vector2.ZERO])
+		backpack_widget.show_external_drag_preview(
+			potential_drag_id,
+			get_viewport().get_mouse_position(),
+			shape_to_draw
+		)
 
 func _perform_drop():
 	var mouse_pos = get_viewport().get_mouse_position()

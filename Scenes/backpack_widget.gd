@@ -1,5 +1,8 @@
 extends Control
 
+@export_group("Drag Preview")
+@export var drag_smooth_speed: float = 25.0
+
 @onready var backpack_bg = $BackpackBG
 @onready var grid = $BackpackBG/CenterContainer/GridContainer 
 @onready var edit_menu = get_node_or_null("EditMenu") 
@@ -17,6 +20,8 @@ var drag_preview_container: Control
 
 const DRAG_OFFSET_Y: float = -80.0
 var target_preview_pos: Vector2 = Vector2.ZERO
+## Форма текущего превью (для магнита и проверки ячейки)
+var _drag_preview_shape: Array = []
 
 func _ready():
 	hide()
@@ -33,10 +38,11 @@ func _ready():
 	grid.draw.connect(_on_grid_draw)
 	_update_grid_visuals()
 
-func _process(delta):
+func _process(delta: float) -> void:
 	if drag_preview_container and drag_preview_container.visible:
+		var weight: float = clampf(drag_smooth_speed * delta, 0.0, 1.0)
 		drag_preview_container.global_position = drag_preview_container.global_position.lerp(
-			target_preview_pos, 25.0 * delta)
+			target_preview_pos, weight)
 
 # ==========================================================
 # --- АЛГОРИТМ АВТО-СБОРКИ (BIN PACKING) ---
@@ -159,36 +165,32 @@ func _rotate_shape_normalized(shape: Array, rot_deg: int) -> Array:
 # ==========================================================
 # --- ИНДУСТРИАЛЬНЫЙ СТАНДАРТ ЦЕНТРОВКИ ИКОНОК ---
 # ==========================================================
-func _align_icon_in_bbox(icon: TextureRect, item_id: int, current_shape: Array, rot_deg: int):
-	if grid.get_child_count() == 0: return
+func _align_icon_in_bbox(icon: TextureRect, _item_id: int, current_shape: Array, rot_deg: int):
+	if grid.get_child_count() == 0:
+		return
 	var c_size = grid.get_child(0).size
 	var h_sep = grid.get_theme_constant("h_separation")
 	var v_sep = grid.get_theme_constant("v_separation")
 	var spacing = Vector2(max(0, h_sep), max(0, v_sep))
 
-	var orig_shape = ItemManager.items_db[item_id]["shape"]
-	var o_max_x = 0; var o_max_y = 0
-	for p in orig_shape:
-		if p.x > o_max_x: o_max_x = p.x
-		if p.y > o_max_y: o_max_y = p.y
-		
-	var orig_w = (o_max_x + 1) * c_size.x + o_max_x * spacing.x
-	var orig_h = (o_max_y + 1) * c_size.y + o_max_y * spacing.y
+	var max_x := 0.0
+	var max_y := 0.0
+	for p in current_shape:
+		if p.x > max_x:
+			max_x = p.x
+		if p.y > max_y:
+			max_y = p.y
 
-	icon.size = Vector2(orig_w, orig_h)
+	var bbox_w: float = (max_x + 1.0) * c_size.x + max_x * spacing.x
+	var bbox_h: float = (max_y + 1.0) * c_size.y + max_y * spacing.y
+
+	icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	icon.size = Vector2(bbox_w, bbox_h)
 	icon.pivot_offset = icon.size / 2.0
 	icon.rotation_degrees = rot_deg
-
-	var c_max_x = 0; var c_max_y = 0
-	for p in current_shape:
-		if p.x > c_max_x: c_max_x = p.x
-		if p.y > c_max_y: c_max_y = p.y
-
-	var cur_w = (c_max_x + 1) * c_size.x + c_max_x * spacing.x
-	var cur_h = (c_max_y + 1) * c_size.y + c_max_y * spacing.y
-
-	var target_center = Vector2(cur_w, cur_h) / 2.0
-	icon.position = target_center - icon.pivot_offset
+	var bbox_center := Vector2(bbox_w, bbox_h) / 2.0
+	icon.position = bbox_center - icon.pivot_offset
 
 # ==========================================================
 # --- МОНОЛИТНАЯ ОТРИСОВКА ---
@@ -273,10 +275,13 @@ func _setup_drag_preview():
 func build_drag_preview(item_id: int, shape: Array, rot_deg: int = 0):
 	for c in drag_preview_container.get_children():
 		c.queue_free()
+	_drag_preview_shape.clear()
 	var sample_cell = null
 	for c in grid.get_children():
 		if c.has_node("ItemIcon"): sample_cell = c; break
-	if not sample_cell: return
+	if not sample_cell:
+		return
+	_drag_preview_shape = shape.duplicate()
 
 	var c_size = sample_cell.size
 	var h_sep = grid.get_theme_constant("h_separation")
@@ -306,22 +311,46 @@ func build_drag_preview(item_id: int, shape: Array, rot_deg: int = 0):
 	drag_preview_container.add_child(icon)
 	_align_icon_in_bbox(icon, item_id, shape, rot_deg)
 
-func show_external_drag_preview(item_id: int, mouse_pos: Vector2):
-	var shape = ItemManager.items_db[item_id]["shape"]
+func show_external_drag_preview(item_id: int, mouse_pos: Vector2, shape_override: Array = []):
+	var shape: Array
+	if shape_override.size() > 0:
+		shape = shape_override
+	else:
+		shape = ItemManager.items_db[item_id]["shape"]
 	build_drag_preview(item_id, shape, 0)
-	update_external_drag_preview(mouse_pos)
+	_update_drag_preview_pos(mouse_pos)
 	drag_preview_container.global_position = target_preview_pos
 	drag_preview_container.show()
 
-func update_external_drag_preview(mouse_pos: Vector2):
-	var cell = _get_cell_at_pos(mouse_pos)
-	if cell:
-		target_preview_pos = cell.global_position
+func update_external_drag_preview(mouse_pos: Vector2) -> void:
+	_update_drag_preview_pos(mouse_pos)
+
+func _get_preview_pixel_size(shape: Array) -> Vector2:
+	if grid.get_child_count() == 0:
+		return Vector2.ZERO
+	var cell_size: Vector2 = grid.get_child(0).size
+	var max_x: float = 0.0
+	var max_y: float = 0.0
+	for p in shape:
+		if p.x > max_x:
+			max_x = p.x
+		if p.y > max_y:
+			max_y = p.y
+	return Vector2((max_x + 1.0) * cell_size.x, (max_y + 1.0) * cell_size.y)
+
+func _update_drag_preview_pos(mouse_pos: Vector2) -> void:
+	var root_cell: Control = _get_cell_at_pos(mouse_pos)
+
+	if (
+		root_cell
+		and not _drag_preview_shape.is_empty()
+		and _can_place_shape(root_cell, _drag_preview_shape, is_dragging_internal)
+	):
+		target_preview_pos = root_cell.global_position
 	else:
-		var half := Vector2.ZERO
-		for c in grid.get_children():
-			if c.has_node("ItemIcon"): half = c.size / 2.0; break
-		target_preview_pos = mouse_pos - half + Vector2(0, DRAG_OFFSET_Y)
+		var offset: Vector2 = Vector2(0, DRAG_OFFSET_Y)
+		var half_size: Vector2 = _get_preview_pixel_size(_drag_preview_shape) / 2.0
+		target_preview_pos = mouse_pos - half_size + offset
 
 func hide_external_drag_preview():
 	drag_preview_container.hide()
@@ -347,7 +376,7 @@ func _input(event):
 						is_dragging_internal = true
 						_hide_icons_for_shape(active_cell, active_shape)
 						build_drag_preview(active_item_id, active_shape, target_rot)
-						update_external_drag_preview(mouse_pos)
+						_update_drag_preview_pos(mouse_pos)
 						drag_preview_container.global_position = target_preview_pos
 						drag_preview_container.show()
 						_update_grid_visuals()
@@ -389,8 +418,14 @@ func _input(event):
 
 func try_add_item(item_id: int, mouse_pos: Vector2, drag_node: Node3D = null) -> bool:
 	var item_data = ItemManager.items_db.get(item_id)
-	if not item_data: return false
-	var shape = item_data["shape"]
+	if not item_data:
+		return false
+
+	var shape: Array
+	if drag_node and drag_node.has_meta("puzzle_shape"):
+		shape = drag_node.get_meta("puzzle_shape")
+	else:
+		shape = item_data.get("shape", [Vector2.ZERO])
 	var target_root = _get_cell_at_pos(mouse_pos)
 	if not target_root: target_root = _find_first_free_slot(shape)
 
@@ -422,6 +457,7 @@ func try_add_item(item_id: int, mouse_pos: Vector2, drag_node: Node3D = null) ->
 
 				_clear_item_from_grid(obs_root, obs_shape)
 
+				# Площадь освобождена — проверяем новый предмет без ignore_active
 				if _can_place_shape(target_root, shape):
 					_place_item_in_grid(target_root, item_id, shape, 0)
 
@@ -469,6 +505,8 @@ func _place_item_in_grid(root_cell: Control, item_id: int, shape: Array, rot_deg
 	var tex_path = ItemManager.items_db[item_id]["texture"]
 	var icon = root_cell.get_node("ItemIcon")
 	icon.texture = load(tex_path)
+	icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 	icon.show()
 	_align_icon_in_bbox(icon, item_id, shape, rot_deg)
 	root_cell.set_meta("current_shape", shape)
@@ -596,7 +634,12 @@ func _start_edit_mode(cell: Control, item_id: int, drag_node: Node3D, shape: Arr
 	active_cell = cell
 	active_item_id = item_id
 	active_drag_node = drag_node
-	active_shape = shape if shape.size() > 0 else ItemManager.items_db[item_id]["shape"]
+	if shape.size() > 0:
+		active_shape = shape
+	elif drag_node and drag_node.has_meta("puzzle_shape"):
+		active_shape = drag_node.get_meta("puzzle_shape").duplicate()
+	else:
+		active_shape = ItemManager.items_db[item_id].get("shape", [Vector2.ZERO])
 	ItemManager.is_edit_mode = true
 
 	if edit_menu:

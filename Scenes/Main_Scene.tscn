@@ -71,6 +71,9 @@ stretch_mode = 6
 [node name="Cabinet" parent="." unique_id=801209297 instance=ExtResource("1_cabinet")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 2.3296428, -2.191621)
 total_rotation_degrees = 360.0
+swipe_sensitivity = 0.15
+max_angular_velocity = 10.0
+friction = 2.0
 
 [node name="WorldEnvironment" type="WorldEnvironment" parent="." unique_id=306027433]
 environment = ExtResource("3_5p0eq")

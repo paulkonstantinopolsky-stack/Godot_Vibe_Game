@@ -26,14 +26,21 @@ const _BP_BLOCKED: Array = [
 	Vector2i(0, 3), Vector2i(3, 3)
 ]
 
-# Все доступные формы паззла (индекс соответствует ShapeType в item_data.gd)
+# Все доступные формы паззла (порядок совпадает с ShapeType в item_data.gd)
 const _ALL_SHAPES: Array = [
-	[Vector2(0, 0)],                                                           # SINGLE   (1 кл.)
-	[Vector2(0, 0), Vector2(0, 1)],                                            # DOUBLE_V (2 кл.)
-	[Vector2(0, 0), Vector2(0, 1), Vector2(1, 1)],                             # CORNER_L (3 кл.)
-	[Vector2(0, 0), Vector2(1, 0), Vector2(0, 1), Vector2(1, 1)],              # SQUARE   (4 кл.)
-	[Vector2(0, 0), Vector2(1, 0), Vector2(1, 1), Vector2(2, 1)],              # ZIGZAG   (4 кл.)
+	[Vector2(0, 0)],
+	[Vector2(0, 0), Vector2(0, 1)],
+	[Vector2(0, 0), Vector2(0, 1), Vector2(0, 2)],
+	[
+		Vector2(0, 0),
+		Vector2(1, 0),
+		Vector2(0, 1),
+		Vector2(1, 1),
+	],
 ]
+
+# Пул форм для спавна: по item_id — очередь фигур для заказа (по одной на слот заказа)
+var _spawn_shape_pool: Dictionary = {}
 
 # =================================================================
 
@@ -119,56 +126,46 @@ func generate_new_order():
 # =================================================================
 
 func _assign_random_shapes() -> void:
-	# Собираем уникальные ID предметов из заказа
-	var order_ids: Array = []
-	for item in current_order:
-		if not item["id"] in order_ids:
-			order_ids.append(item["id"])
-	
 	const MAX_ATTEMPTS := 400
-	var assigned_shapes: Dictionary = {}  # id → shape
-
 	for _attempt in range(MAX_ATTEMPTS):
-		assigned_shapes.clear()
-
-		# Случайно назначаем форму каждому уникальному ID заказа
-		for id in order_ids:
-			assigned_shapes[id] = _ALL_SHAPES[randi() % _ALL_SHAPES.size()].duplicate()
-
-		# Строим список форм для 5 слотов заказа (учитываем повторения одного ID)
+		_spawn_shape_pool.clear()
 		var shapes_to_pack: Array = []
-		for item in current_order:
-			shapes_to_pack.append(assigned_shapes[item["id"]])
 
-		# Сортируем largest-first — точно так же как auto_fill_and_optimize,
-		# чтобы валидация и реальная расстановка использовали один и тот же порядок.
+		for item in current_order:
+			var id: int = item["id"]
+			var rs: Array = _rotate_shape_norm(_ALL_SHAPES[randi() % _ALL_SHAPES.size()], randi() % 4)
+			shapes_to_pack.append(rs)
+			if not _spawn_shape_pool.has(id):
+				_spawn_shape_pool[id] = []
+			_spawn_shape_pool[id].append(rs)
+
 		shapes_to_pack.sort_custom(func(a, b): return a.size() > b.size())
 		if _can_pack_greedy(shapes_to_pack):
-			# Применяем найденные формы
-			for id in assigned_shapes:
-				items_db[id]["shape"] = assigned_shapes[id]
-			# Рандомизируем формы для остальных предметов (не в заказе)
-			for id in items_db:
-				if not id in assigned_shapes:
-					items_db[id]["shape"] = _ALL_SHAPES[randi() % _ALL_SHAPES.size()].duplicate()
 			return
 
-	# Fallback: если за 400 попыток не нашли — назначаем минимальные формы заказу
 	print("ItemManager: не удалось найти вмещающуюся комбинацию, используем SINGLE/DOUBLE")
-	for id in order_ids:
-		items_db[id]["shape"] = _ALL_SHAPES[randi() % 2].duplicate()  # SINGLE или DOUBLE_V
-	for id in items_db:
-		if not id in order_ids:
-			items_db[id]["shape"] = _ALL_SHAPES[randi() % _ALL_SHAPES.size()].duplicate()
+	_spawn_shape_pool.clear()
+	for item in current_order:
+		var id: int = item["id"]
+		var rs: Array = _rotate_shape_norm(_ALL_SHAPES[randi() % 2], randi() % 4)
+		if not _spawn_shape_pool.has(id):
+			_spawn_shape_pool[id] = []
+		_spawn_shape_pool[id].append(rs)
+
+func get_shape_for_instance(item_id: int) -> Array:
+	if _spawn_shape_pool.has(item_id) and _spawn_shape_pool[item_id].size() > 0:
+		var s: Array = _spawn_shape_pool[item_id].pop_front()
+		return s.duplicate()
+	return _rotate_shape_norm(_ALL_SHAPES[randi() % _ALL_SHAPES.size()], randi() % 4).duplicate()
 
 # Жадная проверка: пробуем разместить все формы по очереди в первый свободный слот.
-# Дополнительно гарантируем, что предметы заказа занимают не менее 10 из 12 ячеек
-# → после правильной расстановки остаётся ≤2 клеток, и мусорные предметы туда не влезут.
+# Дополнительно гарантируем минимальную суммарную площадь фигур заказа (чтобы «лёгкие»
+# комбинации не проходили слишком часто — иначе мусор легко заполнит остаток).
 func _can_pack_greedy(shapes: Array) -> bool:
 	var total_cells: int = 0
 	for s in shapes:
 		total_cells += s.size()
-	if total_cells < 10:
+	if total_cells < 7:
 		return false  # Слишком мало — мусор может легко заполнить остаток
 
 	var grid: Dictionary = {}
