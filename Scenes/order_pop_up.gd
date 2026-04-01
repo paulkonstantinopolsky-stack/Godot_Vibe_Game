@@ -7,19 +7,16 @@ extends Control
 @onready var items_grid = $LetterContainer/LetterPaper/Items
 
 func fill_order_icons():
-	# 1. Сначала полностью очищаем список от старых иконок
+	# 1. ПРАВИЛЬНАЯ ОЧИСТКА: Сначала отрываем от дерева, потом удаляем
 	for child in items_grid.get_children():
+		items_grid.remove_child(child)
 		child.queue_free()
 	
-	# 2. Создаем новые карточки на основе текущего заказа в ItemManager
+	# 2. Создаем новые карточки на основе текущего заказа
 	for order_data in ItemManager.current_order:
-		# Проверяем, что сцена карточки привязана, чтобы не было вылета
 		if item_card_scene:
 			var card = item_card_scene.instantiate()
 			items_grid.add_child(card)
 			
-			# Берем путь к текстуре из базы данных по ID предмета
 			var tex_path = ItemManager.items_db[order_data["id"]]["texture"]
-			
-			# Вызываем функцию внутри карточки, чтобы поставить иконку
 			card.set_item(tex_path)

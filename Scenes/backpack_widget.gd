@@ -2,6 +2,7 @@ extends Control
 
 @export_group("Drag Preview")
 @export var drag_smooth_speed: float = 25.0
+@export var drag_pointer_offset: Vector2 = Vector2(0, -120)
 
 @onready var backpack_bg = $BackpackBG
 @onready var grid = $BackpackBG/CenterContainer/GridContainer 
@@ -18,7 +19,6 @@ var active_shape: Array = []
 var is_dragging_internal: bool = false
 var drag_preview_container: Control
 
-const DRAG_OFFSET_Y: float = -80.0
 var target_preview_pos: Vector2 = Vector2.ZERO
 ## Форма текущего превью (для магнита и проверки ячейки)
 var _drag_preview_shape: Array = []
@@ -339,7 +339,8 @@ func _get_preview_pixel_size(shape: Array) -> Vector2:
 	return Vector2((max_x + 1.0) * cell_size.x, (max_y + 1.0) * cell_size.y)
 
 func _update_drag_preview_pos(mouse_pos: Vector2) -> void:
-	var root_cell: Control = _get_cell_at_pos(mouse_pos)
+	var hotspot: Vector2 = mouse_pos + drag_pointer_offset
+	var root_cell: Control = _get_cell_at_pos(hotspot)
 
 	if (
 		root_cell
@@ -348,9 +349,8 @@ func _update_drag_preview_pos(mouse_pos: Vector2) -> void:
 	):
 		target_preview_pos = root_cell.global_position
 	else:
-		var offset: Vector2 = Vector2(0, DRAG_OFFSET_Y)
 		var half_size: Vector2 = _get_preview_pixel_size(_drag_preview_shape) / 2.0
-		target_preview_pos = mouse_pos - half_size + offset
+		target_preview_pos = hotspot - half_size
 
 func hide_external_drag_preview():
 	drag_preview_container.hide()
@@ -396,7 +396,8 @@ func _input(event):
 			if is_dragging_internal:
 				is_dragging_internal = false
 				hide_external_drag_preview()
-				var target_root = _get_cell_at_pos(mouse_pos)
+				var hotspot: Vector2 = mouse_pos + drag_pointer_offset
+				var target_root = _get_cell_at_pos(hotspot)
 				var old_rot = active_cell.get_meta("rot_deg", 0)
 				var success = false
 
@@ -426,8 +427,11 @@ func try_add_item(item_id: int, mouse_pos: Vector2, drag_node: Node3D = null) ->
 		shape = drag_node.get_meta("puzzle_shape")
 	else:
 		shape = item_data.get("shape", [Vector2.ZERO])
-	var target_root = _get_cell_at_pos(mouse_pos)
-	if not target_root: target_root = _find_first_free_slot(shape)
+
+	var hotspot: Vector2 = mouse_pos + drag_pointer_offset
+	var target_root = _get_cell_at_pos(hotspot)
+	if not target_root:
+		target_root = _find_first_free_slot(shape)
 
 	if target_root and _can_place_shape(target_root, shape):
 		_place_item_in_grid(target_root, item_id, shape, 0)
