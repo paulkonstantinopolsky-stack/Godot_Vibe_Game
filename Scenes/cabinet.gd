@@ -201,7 +201,14 @@ func build_cabinet_tornado() -> void:
 	var spawn_list = []
 	for order_item in ItemManager.current_order:
 		spawn_list.append(order_item["id"])
+	if spawn_list == null or spawn_list.is_empty():
+		printerr("build_cabinet_tornado: spawn_list пуст. Проверь генерацию заказа и загрузку items_db.")
+		return
+
 	var all_ids = ItemManager.items_db.keys()
+	if all_ids == null or all_ids.is_empty():
+		printerr("build_cabinet_tornado: items_db пуст (all_ids пуст). Проверь пути/регистр в Items/Data и ресурсы .tres.")
+		return
 	while spawn_list.size() < (ROWS * COLUMNS):
 		spawn_list.append(all_ids[randi() % all_ids.size()])
 	spawn_list.shuffle()

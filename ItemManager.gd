@@ -43,20 +43,28 @@ func _ready():
 func load_items_from_data():
 	var path = "res://Items/Data/"
 	var dir = DirAccess.open(path)
-	if dir:
-		dir.list_dir_begin()
-		var file_name = dir.get_next()
-		while file_name != "":
-			if file_name.ends_with(".tres"):
-				var res = load(path + file_name) as ItemData
+	if dir == null:
+		printerr("ItemManager: не удалось открыть папку данных предметов: ", path)
+		return
+
+	dir.list_dir_begin()
+	var file_name = dir.get_next()
+	while file_name != "":
+		if not dir.current_is_dir():
+			# В экспортированных сборках Godot может отдавать имена как *.tres.remap
+			# (особенно в APK). Убираем суффикс перед проверкой расширения.
+			var clean_name = file_name.trim_suffix(".remap")
+			if clean_name.ends_with(".tres"):
+				# Загружаем по "чистому" пути: Godot сам разрулит remap внутри экспорта.
+				var res = load(path + clean_name) as ItemData
 				if res:
 					var shape_data = res.get_shape() if res.has_method("get_shape") else res.shape.duplicate()
 					items_db[res.id] = {
-						"name": file_name.get_basename(),
+						"name": clean_name.get_basename(),
 						"texture": res.texture.resource_path if res.texture else "",
 						"shape": shape_data
 					}
-			file_name = dir.get_next()
+		file_name = dir.get_next()
 	print("БАЗА ПРЕДМЕТОВ ЗАГРУЖЕНА: ", items_db.size(), " объектов")
 
 func mark_item_as_found(item_id: int):
