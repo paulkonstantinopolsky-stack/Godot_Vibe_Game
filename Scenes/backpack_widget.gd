@@ -4,6 +4,7 @@ extends Control
 @onready var grid = $BackpackBG/CenterContainer/GridContainer 
 @onready var edit_menu = get_node_or_null("EditMenu") 
 
+var default_edit_menu_pos: Vector2 = Vector2.ZERO
 var hide_pos_offset = 600 
 
 var active_cell: Control = null
@@ -22,6 +23,7 @@ func _ready():
 	modulate.a = 0.0
 	
 	if edit_menu:
+		default_edit_menu_pos = edit_menu.position
 		edit_menu.hide()
 		if edit_menu.has_node("BtnRotate"): edit_menu.get_node("BtnRotate").pressed.connect(_on_btn_rotate)
 		if edit_menu.has_node("BtnConfirm"): edit_menu.get_node("BtnConfirm").pressed.connect(_on_btn_confirm)
@@ -269,7 +271,8 @@ func _setup_drag_preview():
 	drag_preview_container.hide()
 
 func build_drag_preview(item_id: int, shape: Array, rot_deg: int = 0):
-	for c in drag_preview_container.get_children(): c.queue_free()
+	for c in drag_preview_container.get_children():
+		c.queue_free()
 	var sample_cell = null
 	for c in grid.get_children():
 		if c.has_node("ItemIcon"): sample_cell = c; break
@@ -279,10 +282,10 @@ func build_drag_preview(item_id: int, shape: Array, rot_deg: int = 0):
 	var h_sep = grid.get_theme_constant("h_separation")
 	var v_sep = grid.get_theme_constant("v_separation")
 	var spacing = Vector2(max(0, h_sep), max(0, v_sep))
-	
+
 	for offset in shape:
 		var panel = Panel.new()
-		var style = _get_merged_stylebox(shape, offset, false, true) 
+		var style = _get_merged_stylebox(shape, offset, false, true)
 		panel.add_theme_stylebox_override("panel", style)
 		var p_pos = Vector2(offset.x * (c_size.x + spacing.x), offset.y * (c_size.y + spacing.y))
 		var p_size = c_size
@@ -292,7 +295,8 @@ func build_drag_preview(item_id: int, shape: Array, rot_deg: int = 0):
 		if shape.has(offset + Vector2(-1, 0)): p_pos.x -= expand; p_size.x += expand
 		if shape.has(offset + Vector2(0, -1)): p_pos.y -= expand; p_size.y += expand
 
-		panel.position = p_pos; panel.size = p_size
+		panel.position = p_pos
+		panel.size = p_size
 		drag_preview_container.add_child(panel)
 
 	var icon = TextureRect.new()
@@ -329,6 +333,9 @@ func _input(event):
 	var mouse_pos = get_global_mouse_position()
 	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
 		if event.pressed:
+			if edit_menu and edit_menu.visible and edit_menu.get_global_rect().has_point(mouse_pos):
+				return
+
 			var clicked_cell = _get_cell_at_pos(mouse_pos)
 			if clicked_cell:
 				var occupant_id = clicked_cell.get_meta("occupied_by_id", -1)
@@ -349,9 +356,13 @@ func _input(event):
 						var saved_drag_node = target_root.get_meta("source_drag_node") if target_root.has_meta("source_drag_node") else null
 						_start_edit_mode(target_root, occupant_id, saved_drag_node, target_shape)
 						get_viewport().set_input_as_handled()
-				else:
-					if ItemManager.is_edit_mode and edit_menu and not edit_menu.get_global_rect().has_point(mouse_pos):
-						_close_edit_mode()
+			else:
+				if (
+					ItemManager.is_edit_mode
+					and edit_menu
+					and not edit_menu.get_global_rect().has_point(mouse_pos)
+				):
+					_close_edit_mode()
 		else:
 			if is_dragging_internal:
 				is_dragging_internal = false
@@ -365,8 +376,6 @@ func _input(event):
 					active_cell = target_root
 					_place_item_in_grid(active_cell, active_item_id, active_shape, old_rot)
 					success = true
-				elif target_root:
-					success = _try_swap_on_drop(target_root, old_rot)
 
 				if success:
 					_show_icons_for_shape(active_cell, active_shape)
@@ -384,6 +393,7 @@ func try_add_item(item_id: int, mouse_pos: Vector2, drag_node: Node3D = null) ->
 	var shape = item_data["shape"]
 	var target_root = _get_cell_at_pos(mouse_pos)
 	if not target_root: target_root = _find_first_free_slot(shape)
+
 	if target_root and _can_place_shape(target_root, shape):
 		_place_item_in_grid(target_root, item_id, shape, 0)
 		if drag_node: target_root.set_meta("source_drag_node", drag_node)
@@ -391,38 +401,57 @@ func try_add_item(item_id: int, mouse_pos: Vector2, drag_node: Node3D = null) ->
 		ItemManager.mark_item_as_found(item_id)
 		return true
 
-	# Swap: если под пальцем один чужой предмет — вытесняем его
+	# 2. Попытка вытеснить предмет (Swap), если под нами ровно 1 помеха
 	if target_root:
 		var obstacles = _get_obstacle_roots(target_root, shape)
 		if obstacles.size() == 1:
 			var obs_root = obstacles[0]
+
 			var obs_id = -1
 			for c_cell in grid.get_children():
 				if c_cell.has_meta("root_cell") and c_cell.get_meta("root_cell") == obs_root:
-					obs_id = c_cell.get_meta("occupied_by_id", -1); break
+					obs_id = c_cell.get_meta("occupied_by_id", -1)
+					if obs_id != -1:
+						break
+
 			if obs_id != -1:
 				var obs_shape = obs_root.get_meta("current_shape")
 				var obs_rot = obs_root.get_meta("rot_deg", 0)
 				var obs_drag = obs_root.get_meta("source_drag_node") if obs_root.has_meta("source_drag_node") else null
 				var obs_pos = obs_root.global_position + (obs_root.size / 2.0)
+
 				_clear_item_from_grid(obs_root, obs_shape)
+
 				if _can_place_shape(target_root, shape):
 					_place_item_in_grid(target_root, item_id, shape, 0)
-					if drag_node: target_root.set_meta("source_drag_node", drag_node)
+
 					var free_slot = _find_first_free_slot(obs_shape)
 					if free_slot:
 						_place_item_in_grid(free_slot, obs_id, obs_shape, obs_rot)
 						if obs_drag: free_slot.set_meta("source_drag_node", obs_drag)
+						if drag_node: target_root.set_meta("source_drag_node", drag_node)
+
 						_animate_swap_fly(free_slot, obs_pos)
+						_close_edit_mode()
+						ItemManager.mark_item_as_found(item_id)
+						return true
 					else:
-						if get_tree().current_scene.has_method("fly_back_to_cabinet"):
-							get_tree().current_scene.fly_back_to_cabinet(obs_id, obs_pos, obs_drag)
-					_close_edit_mode()
-					ItemManager.mark_item_as_found(item_id)
-					return true
+						_clear_item_from_grid(target_root, shape)
+						_place_item_in_grid(obs_root, obs_id, obs_shape, obs_rot)
+						if obs_drag: obs_root.set_meta("source_drag_node", obs_drag)
 				else:
 					_place_item_in_grid(obs_root, obs_id, obs_shape, obs_rot)
 					if obs_drag: obs_root.set_meta("source_drag_node", obs_drag)
+
+	# 3. АВТО-УСТАНОВКА (План Б)
+	var auto_slot = _find_first_free_slot(shape)
+	if auto_slot:
+		_place_item_in_grid(auto_slot, item_id, shape, 0)
+		if drag_node: auto_slot.set_meta("source_drag_node", drag_node)
+		_close_edit_mode()
+		ItemManager.mark_item_as_found(item_id)
+		return true
+
 	return false
 
 func _can_place_shape(root_cell: Control, shape: Array, ignore_active: bool = false) -> bool:
@@ -461,50 +490,6 @@ func _clear_item_from_grid(root_cell: Control, shape: Array):
 	root_cell.get_node("ItemIcon").texture = null
 	root_cell.get_node("ItemIcon").hide()
 	_update_grid_visuals()
-
-# ==========================================================
-# --- SWAP ON DROP ---
-# ==========================================================
-func _try_swap_on_drop(target_root: Control, rot_deg: int) -> bool:
-	var obstacles = _get_obstacle_roots(target_root, active_shape)
-	if obstacles.size() != 1:
-		return false
-
-	var obs_root = obstacles[0]
-	var obs_id = obs_root.get_meta("occupied_by_id", -1) if obs_root.has_meta("occupied_by_id") else -1
-	if obs_id == -1:
-		# Fallback: take id from the root cell's first child meta
-		for c_cell in grid.get_children():
-			if c_cell.has_meta("root_cell") and c_cell.get_meta("root_cell") == obs_root:
-				obs_id = c_cell.get_meta("occupied_by_id", -1)
-				break
-	if obs_id == -1: return false
-
-	var obs_shape = obs_root.get_meta("current_shape")
-	var obs_rot = obs_root.get_meta("rot_deg", 0)
-	var obs_drag_node = obs_root.get_meta("source_drag_node") if obs_root.has_meta("source_drag_node") else null
-	var obs_old_pos = obs_root.global_position + (obs_root.size / 2.0)
-
-	_clear_item_from_grid(obs_root, obs_shape)
-
-	if not _can_place_shape(target_root, active_shape, true):
-		_place_item_in_grid(obs_root, obs_id, obs_shape, obs_rot)
-		if obs_drag_node: obs_root.set_meta("source_drag_node", obs_drag_node)
-		return false
-
-	_clear_item_from_grid(active_cell, active_shape)
-	active_cell = target_root
-	_place_item_in_grid(active_cell, active_item_id, active_shape, rot_deg)
-
-	var free_slot = _find_first_free_slot(obs_shape)
-	if free_slot:
-		_place_item_in_grid(free_slot, obs_id, obs_shape, obs_rot)
-		if obs_drag_node: free_slot.set_meta("source_drag_node", obs_drag_node)
-		_animate_swap_fly(free_slot, obs_old_pos)
-	else:
-		if get_tree().current_scene.has_method("fly_back_to_cabinet"):
-			get_tree().current_scene.fly_back_to_cabinet(obs_id, obs_old_pos, obs_drag_node)
-	return true
 
 func _get_obstacle_roots(root_cell: Control, shape: Array) -> Array:
 	var roots: Array = []
@@ -577,40 +562,76 @@ func _on_btn_rotate():
 		_update_grid_visuals()
 
 func _on_btn_confirm():
-	if active_item_id == -1: return # Жесткий блок от двойных кликов
-	
-	var confirmed_id = active_item_id 
-	_close_edit_mode()                
+	if active_item_id == -1:
+		return
+	var confirmed_id = active_item_id
+	_close_edit_mode()
 	ItemManager.mark_item_as_found(confirmed_id)
 
 func _on_btn_cancel():
+	if not active_cell:
+		_close_edit_mode()
+		return
+
 	var fly_pos = active_cell.global_position + (active_cell.size / 2.0)
 	var shape_to_clear = active_shape.duplicate()
 	var cell_to_clear = active_cell
 	var item_to_return = active_item_id
 	var drag_node_to_return = active_drag_node
-	_close_edit_mode(); _clear_item_from_grid(cell_to_clear, shape_to_clear)
-	if get_tree().current_scene.has_method("fly_back_to_cabinet"): get_tree().current_scene.fly_back_to_cabinet(item_to_return, fly_pos, drag_node_to_return)
+
+	_clear_item_from_grid(cell_to_clear, shape_to_clear)
+	if get_tree().current_scene.has_method("fly_back_to_cabinet"):
+		get_tree().current_scene.fly_back_to_cabinet(item_to_return, fly_pos, drag_node_to_return)
+
+	active_cell = null
+	active_item_id = -1
+	active_drag_node = null
+	active_shape = []
+
+	ItemManager.is_edit_mode = false
+	_tween_hide_edit_menu()
+	_update_grid_visuals()
 
 func _start_edit_mode(cell: Control, item_id: int, drag_node: Node3D, shape: Array = []):
-	var was_edit_mode = ItemManager.is_edit_mode
-	active_cell = cell; active_item_id = item_id; active_drag_node = drag_node
+	active_cell = cell
+	active_item_id = item_id
+	active_drag_node = drag_node
 	active_shape = shape if shape.size() > 0 else ItemManager.items_db[item_id]["shape"]
 	ItemManager.is_edit_mode = true
-	if edit_menu and not was_edit_mode:
-		edit_menu.modulate.a = 1.0; edit_menu.show(); edit_menu.scale = Vector2(0.5, 0.5)
+
+	if edit_menu:
+		edit_menu.top_level = false
+		edit_menu.z_index = 0
+		edit_menu.position = default_edit_menu_pos
+		if edit_menu.has_node("BtnRotate"):
+			edit_menu.get_node("BtnRotate").show()
+		if edit_menu.has_node("BtnConfirm"):
+			edit_menu.get_node("BtnConfirm").show()
+		edit_menu.modulate.a = 1.0
+		edit_menu.show()
+		edit_menu.scale = Vector2(0.5, 0.5)
 		edit_menu.pivot_offset = edit_menu.size / 2.0
-		create_tween().set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT).tween_property(edit_menu, "scale", Vector2.ONE, 0.2)
+		create_tween().set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT).tween_property(
+			edit_menu, "scale", Vector2.ONE, 0.2)
 	_update_grid_visuals()
 
-func _close_edit_mode():
-	ItemManager.is_edit_mode = false; active_cell = null; active_item_id = -1
+func _tween_hide_edit_menu() -> void:
+	if not edit_menu:
+		return
+	var tw = create_tween().set_parallel(true).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN)
+	tw.tween_property(edit_menu, "scale", Vector2(0.5, 0.5), 0.15)
+	tw.tween_property(edit_menu, "modulate:a", 0.0, 0.15)
+	tw.chain().tween_callback(edit_menu.hide)
+
+func _close_edit_mode(hide_menu: bool = true):
+	ItemManager.is_edit_mode = false
+	active_cell = null
+	active_item_id = -1
+	active_drag_node = null
+	active_shape = []
 	_update_grid_visuals()
-	if edit_menu:
-		var tw = create_tween().set_parallel(true).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN)
-		tw.tween_property(edit_menu, "scale", Vector2(0.5, 0.5), 0.15)
-		tw.tween_property(edit_menu, "modulate:a", 0.0, 0.15)
-		tw.chain().tween_callback(edit_menu.hide)
+	if hide_menu:
+		_tween_hide_edit_menu()
 
 func _get_cell_coords(cell: Control) -> Vector2i:
 	var idx = cell.get_index(); return Vector2i(idx % grid.columns, idx / grid.columns)

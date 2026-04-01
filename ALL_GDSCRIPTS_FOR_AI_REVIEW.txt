@@ -1,0 +1,2433 @@
+# Все GDScript-файлы проекта (дамп для ревью другой AI)
+
+Назначение: единый текст со всеми скриптами и краткими тезисами по каждому.
+Формат секции: разделитель, путь res://, ROLE (тезисно), черта, полный код файла.
+
+--------------------------------------------------------------------------------
+ОГЛАВЛЕНИЕ (кратко)
+--------------------------------------------------------------------------------
+- res://item_data.gd — ресурс предмета (ItemData): enum форм, get_shape().
+- res://ItemManager.gd — автозагрузка: база из Items/Data, .remap; заказ, комбо, умные формы, greedy-pack.
+- res://item_card.gd — мини-виджет иконки заказа в конверте.
+- res://Scenes/order_pop_up.gd — заполнение сетки карточек заказа из item_card_scene.
+- res://Scenes/side_widget_entry.gd — одна карточка бокового виджета; flip_to_front.
+- res://Scenes/side_widget.gd — список заказа сбоку, реакция на item_found.
+- res://Scenes/cell_border.gd — рамка ячейки рюкзака: состояния, пунктир, отрисовка.
+- res://Scenes/Item_3d.gd — 3D-предмет в шкафу: клик, item_pressed, hide/show.
+- res://Scenes/cell_red.gd — красная ячейка: анимация дверей, unlock монеты.
+- res://Scenes/coin_3d.gd — монета в бонус-ячейке: сбор, вызов on_coin_collected, полёт.
+- res://Scenes/cabinet.gd — цилиндрический шкаф: сборка, вращение, бонусы, монеты по колонкам.
+- res://Scenes/main_scene.gd — главная сцена: UI, таймер, драг, autofill, fly_back, cinematic queue.
+- res://Scenes/backpack_widget.gd — рюкзак: сетка, autofill, драг, swap, floating item, EditMenu.
+
+================================================================================
+
+================================================================================
+FILE: res://item_data.gd
+ROLE (кратко):
+Ресурс ItemData: enum форм паззла, текстура, get_shape().
+--------------------------------------------------------------------------------
+extends Resource
+class_name ItemData
+
+enum ShapeType {
+	SINGLE,      # 1 клетка
+	DOUBLE_V,    # 2 клетки вертикально
+	CORNER_L,    # 3 клетки (уголок)
+	SQUARE,      # 4 клетки (квадрат)
+	ZIGZAG       # 4 клетки (зигзаг)
+}
+
+@export var id: int = 0
+@export var texture: Texture2D
+@export var shape_type: ShapeType = ShapeType.SINGLE
+
+# Скрываем старый массив, чтобы не сломать кэш Godot, но убираем его с глаз долой
+var shape: Array[Vector2] = []
+
+func get_shape() -> Array:
+	match shape_type:
+		ShapeType.SINGLE: return [Vector2(0, 0)]
+		ShapeType.DOUBLE_V: return [Vector2(0, 0), Vector2(0, 1)]
+		ShapeType.CORNER_L: return [Vector2(0, 0), Vector2(0, 1), Vector2(1, 1)]
+		ShapeType.SQUARE: return [Vector2(0, 0), Vector2(1, 0), Vector2(0, 1), Vector2(1, 1)]
+		ShapeType.ZIGZAG: return [Vector2(0, 0), Vector2(1, 0), Vector2(1, 1), Vector2(2, 1)]
+	return [Vector2(0, 0)]
+
+================================================================================
+FILE: res://ItemManager.gd
+ROLE (кратко):
+База предметов, заказ, комбо, сигналы; load с .remap; генерация форм и проверка вмещения.
+--------------------------------------------------------------------------------
+extends Node
+
+var items_db = {}
+var current_order = []
+
+@warning_ignore("unused_signal")
+signal item_found(id)
+@warning_ignore("unused_signal")
+signal item_pressed(id: int, tex_path: String, node: Node3D) 
+signal bonus_cell_unlocked()
+
+var is_dragging_item: bool = false 
+var is_edit_mode: bool = false
+
+var combo_score: int = 0
+var combo_failed: bool = false
+
+# =================================================================
+# ГЕОМЕТРИЯ РЮКЗАКА (для проверки вместимости при генерации форм)
+# =================================================================
+# Сетка 4×4 = 16 позиций, 4 угловые заблокированы Spacer-нодами → 12 реальных ячеек
+const _BP_COLS: int = 4
+const _BP_ROWS: int = 4
+const _BP_BLOCKED: Array = [
+	Vector2i(0, 0), Vector2i(3, 0),
+	Vector2i(0, 3), Vector2i(3, 3)
+]
+
+# Все доступные формы паззла (индекс соответствует ShapeType в item_data.gd)
+const _ALL_SHAPES: Array = [
+	[Vector2(0, 0)],                                                           # SINGLE   (1 кл.)
+	[Vector2(0, 0), Vector2(0, 1)],                                            # DOUBLE_V (2 кл.)
+	[Vector2(0, 0), Vector2(0, 1), Vector2(1, 1)],                             # CORNER_L (3 кл.)
+	[Vector2(0, 0), Vector2(1, 0), Vector2(0, 1), Vector2(1, 1)],              # SQUARE   (4 кл.)
+	[Vector2(0, 0), Vector2(1, 0), Vector2(1, 1), Vector2(2, 1)],              # ZIGZAG   (4 кл.)
+]
+
+# =================================================================
+
+func _ready():
+	load_items_from_data()
+
+func load_items_from_data():
+	var path = "res://Items/Data/"
+	var dir = DirAccess.open(path)
+	if dir == null:
+		printerr("ItemManager: не удалось открыть папку данных предметов: ", path)
+		return
+
+	dir.list_dir_begin()
+	var file_name = dir.get_next()
+	while file_name != "":
+		if not dir.current_is_dir():
+			# В экспортированных сборках Godot может отдавать имена как *.tres.remap
+			# (особенно в APK). Убираем суффикс перед проверкой расширения.
+			var clean_name = file_name.trim_suffix(".remap")
+			if clean_name.ends_with(".tres"):
+				# Загружаем по "чистому" пути: Godot сам разрулит remap внутри экспорта.
+				var res = load(path + clean_name) as ItemData
+				if res:
+					var shape_data = res.get_shape() if res.has_method("get_shape") else res.shape.duplicate()
+					items_db[res.id] = {
+						"name": clean_name.get_basename(),
+						"texture": res.texture.resource_path if res.texture else "",
+						"shape": shape_data
+					}
+		file_name = dir.get_next()
+	print("БАЗА ПРЕДМЕТОВ ЗАГРУЖЕНА: ", items_db.size(), " объектов")
+
+func mark_item_as_found(item_id: int):
+	if item_id == -1: return 
+	
+	var is_part_of_order = false
+	var was_just_found = false
+	
+	for item in current_order:
+		if item["id"] == item_id and not item["found"]:
+			is_part_of_order = true
+			item["found"] = true
+			was_just_found = true
+			item_found.emit(item_id)
+			break
+	
+	if not is_part_of_order:
+		var is_already_packed = false
+		for item in current_order:
+			if item["id"] == item_id and item["found"]:
+				is_already_packed = true
+				break
+		if not is_already_packed:
+			combo_failed = true
+	else:
+		if was_just_found and not combo_failed:
+			combo_score += 1
+			if combo_score == 2 or combo_score == 4 or combo_score == 5:
+				bonus_cell_unlocked.emit()
+
+func generate_new_order():
+	current_order.clear()
+	combo_score = 0
+	combo_failed = false
+	
+	var all_ids = items_db.keys()
+	if all_ids.size() == 0:
+		print("Внимание: база предметов пуста!")
+		return
+		
+	# Генерируем 5 случайных предметов (могут повторяться)
+	for i in range(5):
+		var random_id = all_ids[randi() % all_ids.size()]
+		current_order.append({"id": random_id, "found": false})
+	
+	# Назначаем рандомные формы всем предметам в базе,
+	# гарантируя что 5 предметов из заказа влезут в рюкзак
+	_assign_random_shapes()
+
+# =================================================================
+# УМНЫЙ РАНДОМ ФОРМ
+# =================================================================
+
+func _assign_random_shapes() -> void:
+	# Собираем уникальные ID предметов из заказа
+	var order_ids: Array = []
+	for item in current_order:
+		if not item["id"] in order_ids:
+			order_ids.append(item["id"])
+	
+	const MAX_ATTEMPTS := 400
+	var assigned_shapes: Dictionary = {}  # id → shape
+
+	for _attempt in range(MAX_ATTEMPTS):
+		assigned_shapes.clear()
+
+		# Случайно назначаем форму каждому уникальному ID заказа
+		for id in order_ids:
+			assigned_shapes[id] = _ALL_SHAPES[randi() % _ALL_SHAPES.size()].duplicate()
+
+		# Строим список форм для 5 слотов заказа (учитываем повторения одного ID)
+		var shapes_to_pack: Array = []
+		for item in current_order:
+			shapes_to_pack.append(assigned_shapes[item["id"]])
+
+		# Сортируем largest-first — точно так же как auto_fill_and_optimize,
+		# чтобы валидация и реальная расстановка использовали один и тот же порядок.
+		shapes_to_pack.sort_custom(func(a, b): return a.size() > b.size())
+		if _can_pack_greedy(shapes_to_pack):
+			# Применяем найденные формы
+			for id in assigned_shapes:
+				items_db[id]["shape"] = assigned_shapes[id]
+			# Рандомизируем формы для остальных предметов (не в заказе)
+			for id in items_db:
+				if not id in assigned_shapes:
+					items_db[id]["shape"] = _ALL_SHAPES[randi() % _ALL_SHAPES.size()].duplicate()
+			return
+
+	# Fallback: если за 400 попыток не нашли — назначаем минимальные формы заказу
+	print("ItemManager: не удалось найти вмещающуюся комбинацию, используем SINGLE/DOUBLE")
+	for id in order_ids:
+		items_db[id]["shape"] = _ALL_SHAPES[randi() % 2].duplicate()  # SINGLE или DOUBLE_V
+	for id in items_db:
+		if not id in order_ids:
+			items_db[id]["shape"] = _ALL_SHAPES[randi() % _ALL_SHAPES.size()].duplicate()
+
+# Жадная проверка: пробуем разместить все формы по очереди в первый свободный слот.
+# Дополнительно гарантируем, что предметы заказа занимают не менее 10 из 12 ячеек
+# → после правильной расстановки остаётся ≤2 клеток, и мусорные предметы туда не влезут.
+func _can_pack_greedy(shapes: Array) -> bool:
+	var total_cells: int = 0
+	for s in shapes:
+		total_cells += s.size()
+	if total_cells < 10:
+		return false  # Слишком мало — мусор может легко заполнить остаток
+
+	var grid: Dictionary = {}
+	for r in range(_BP_ROWS):
+		for c in range(_BP_COLS):
+			if not Vector2i(c, r) in _BP_BLOCKED:
+				grid[Vector2i(c, r)] = true
+
+	for shape in shapes:
+		if not _greedy_place(shape, grid):
+			return false
+	return true
+
+# Пробует разместить shape (с перебором ротаций и позиций).
+# При успехе занимает клетки в grid и возвращает true.
+func _greedy_place(shape: Array, grid: Dictionary) -> bool:
+	for rot in range(4):
+		var rotated: Array = _rotate_shape_norm(shape, rot)
+		for r in range(_BP_ROWS):
+			for c in range(_BP_COLS):
+				var cells: Array = []
+				var ok := true
+				for offset in rotated:
+					var cell := Vector2i(c + int(offset.x), r + int(offset.y))
+					if not grid.has(cell):
+						ok = false
+						break
+					cells.append(cell)
+				if ok:
+					for cell in cells:
+						grid.erase(cell)
+					return true
+	return false
+
+# Поворот формы на rot*90° с нормализацией к началу координат
+func _rotate_shape_norm(shape: Array, rot: int) -> Array:
+	var result: Array = shape.duplicate()
+	for _i in range(rot % 4):
+		var temp: Array = []
+		for p in result:
+			temp.append(Vector2(-p.y, p.x))
+		var min_x: float = temp[0].x
+		var min_y: float = temp[0].y
+		for p in temp:
+			if p.x < min_x: min_x = p.x
+			if p.y < min_y: min_y = p.y
+		result = []
+		for p in temp:
+			result.append(p - Vector2(min_x, min_y))
+	return result
+
+================================================================================
+FILE: res://item_card.gd
+ROLE (кратко):
+Простая карточка: подстановка текстуры в Icon.
+--------------------------------------------------------------------------------
+extends Control
+
+func set_item(tex_path: String):
+	if has_node("Icon"):
+		$Icon.texture = load(tex_path)
+
+================================================================================
+FILE: res://Scenes/order_pop_up.gd
+ROLE (кратко):
+Иконки текущего заказа в конверте через item_card_scene.
+--------------------------------------------------------------------------------
+extends Control
+
+# Ссылка на сцену карточки (должна быть назначена в Инспекторе Godot!)
+@export var item_card_scene: PackedScene
+
+# Ссылка на узел, куда будут складываться иконки
+@onready var items_grid = $LetterContainer/LetterPaper/Items
+
+func fill_order_icons():
+	# 1. Сначала полностью очищаем список от старых иконок
+	for child in items_grid.get_children():
+		child.queue_free()
+	
+	# 2. Создаем новые карточки на основе текущего заказа в ItemManager
+	for order_data in ItemManager.current_order:
+		# Проверяем, что сцена карточки привязана, чтобы не было вылета
+		if item_card_scene:
+			var card = item_card_scene.instantiate()
+			items_grid.add_child(card)
+			
+			# Берем путь к текстуре из базы данных по ID предмета
+			var tex_path = ItemManager.items_db[order_data["id"]]["texture"]
+			
+			# Вызываем функцию внутри карточки, чтобы поставить иконку
+			card.set_item(tex_path)
+
+================================================================================
+FILE: res://Scenes/side_widget_entry.gd
+ROLE (кратко):
+Одна строка заказа сбоку: setup, анимация переворота карточки.
+--------------------------------------------------------------------------------
+extends Control
+
+@onready var back = $Back
+@onready var front = $Front
+
+var item_id: int = -1
+
+func setup(id: int, texture_path: String):
+	item_id = id
+	front.texture = load(texture_path)
+	front.scale.x = 0 # Убеждаемся, что лицо скрыто
+	back.scale.x = 1
+	back.show()
+
+# Функция красивого переворота карточки
+func flip_to_front():
+	var tw = create_tween().set_ease(Tween.EASE_IN_OUT).set_trans(Tween.TRANS_QUAD)
+	
+	# 1. Схлопываем спинку (вопросик) до нуля
+	tw.tween_property(back, "scale:x", 0.0, 0.15)
+	
+	# 2. Прячем спинку, показываем лицо (в момент, когда ширина = 0)
+	tw.tween_callback(back.hide)
+	tw.tween_callback(front.show)
+	
+	# 3. Разворачиваем лицо до нормального размера
+	tw.tween_property(front, "scale:x", 1.0, 0.15)
+
+================================================================================
+FILE: res://Scenes/side_widget.gd
+ROLE (кратко):
+Контейнер карточек заказа; появление; flip при item_found.
+--------------------------------------------------------------------------------
+extends Control
+
+@export var entry_scene: PackedScene = preload("res://Scenes/SideWidgetEntry.tscn")
+
+@onready var items_container = $ItemsContainer
+@onready var small_envelope = $SmallEnvelope
+
+const ITEM_SIZE = 120.0
+const SPACING = 30.0
+
+func _ready():
+	hide()
+	if !ItemManager.item_found.is_connected(_on_item_found):
+		ItemManager.item_found.connect(_on_item_found)
+
+func start_appear_animation():
+	# ПРАВИЛЬНАЯ ОЧИСТКА: отрываем от интерфейса перед удалением
+	for c in items_container.get_children():
+		items_container.remove_child(c)
+		c.queue_free()
+	
+	show()
+	modulate.a = 0.0
+	create_tween().tween_property(self, "modulate:a", 1.0, 0.3)
+	
+	for i in range(ItemManager.current_order.size()):
+		var item_data = ItemManager.current_order[i]
+		var entry = entry_scene.instantiate()
+		items_container.add_child(entry)
+		
+		entry.setup(item_data["id"], ItemManager.items_db[item_data["id"]]["texture"])
+		
+		var is_already_found = item_data["found"]
+		entry.set_meta("is_flipped", is_already_found)
+		if is_already_found and entry.has_method("flip_to_front"):
+			entry.flip_to_front()
+		
+		var target_pos = Vector2(0, i * (ITEM_SIZE + SPACING))
+		var diff = small_envelope.position - items_container.position
+		var start_pos = diff + Vector2((small_envelope.size.x - ITEM_SIZE)/2, (small_envelope.size.y - ITEM_SIZE)/2)
+		
+		entry.position = start_pos
+		entry.scale = Vector2(0.1, 0.1)
+		
+		var tw = create_tween().set_parallel(true).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+		tw.tween_property(entry, "position", target_pos, 0.6).set_delay(i * 0.1)
+		tw.tween_property(entry, "scale", Vector2.ONE, 0.6).set_delay(i * 0.1)
+
+func _on_item_found(id: int):
+	for entry in items_container.get_children():
+		if int(entry.item_id) == int(id) and not entry.get_meta("is_flipped", false):
+			entry.flip_to_front()
+			entry.set_meta("is_flipped", true)
+			break
+
+================================================================================
+FILE: res://Scenes/cell_border.gd
+ROLE (кратко):
+Визуальная рамка ячейки: default/dashed/focused, пунктир с анимацией.
+--------------------------------------------------------------------------------
+extends Control
+
+# Наши 3 состояния
+enum State { DEFAULT, DASHED, FOCUSED }
+var current_state: State = State.DEFAULT
+
+# --- ТЕКСТУРЫ ФОНА ---
+@export var default_bg_texture: Texture2D
+@export var focused_bg_texture: Texture2D
+
+# --- НАСТРОЙКИ ДИЗАЙНА (ТВОИ) ---
+var corner_radius = 12.0
+var focused_width = 6.0
+var focused_color = Color("#ffffff") 
+
+var dashed_width = 3.0
+var dashed_color = Color("#5C3621")
+var dash = 18.0
+var gap = 18.0
+var dash_speed = 20.0 
+var dash_offset = 0.0
+
+var focused_style: StyleBoxFlat
+
+@onready var default_png = $DefaultBorderPNG
+# Безопасный вызов, так как узла больше нет в сцене
+@onready var focus_triangles_png = get_node_or_null("FocusTrianglesPNG")
+@onready var root_cell = $".."
+
+# --- ПЕРЕМЕННЫЕ ДЛЯ ПЛАВНЫХ АНИМАЦИЙ ---
+var alpha_default: float = 1.0
+var alpha_dashed: float = 0.0
+var alpha_focused: float = 0.0
+var fade_tween: Tween
+
+func _ready():
+	focused_style = StyleBoxFlat.new()
+	focused_style.bg_color = Color.TRANSPARENT
+	focused_style.border_color = focused_color
+	focused_style.set_border_width_all(int(focused_width))
+	focused_style.set_corner_radius_all(int(corner_radius))
+	focused_style.anti_aliasing = true
+	
+	if default_png: 
+		default_png.hide()
+		default_png.modulate.a = 1.0
+
+func _process(delta):
+	var needs_redraw = false
+	
+	# Двигаем пунктир, только если он хоть немного виден
+	if alpha_dashed > 0.0:
+		dash_offset += dash_speed * delta
+		needs_redraw = true
+		
+	# Заставляем перерисовываться кадры во время анимации смешивания цветов
+	if fade_tween and fade_tween.is_running():
+		needs_redraw = true
+		
+	if needs_redraw:
+		queue_redraw()
+
+func set_state(new_state: int):
+	current_state = new_state as State
+	
+	if root_cell:
+		root_cell.clip_contents = false
+		if current_state == State.FOCUSED:
+			root_cell.z_index = 1
+		else:
+			root_cell.z_index = 0
+			
+	# Убиваем старую анимацию, если она не закончилась
+	if fade_tween and fade_tween.is_running():
+		fade_tween.kill()
+		
+	# Запускаем новую плавную анимацию прозрачности (0.2 сек)
+	fade_tween = create_tween().set_parallel(true).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
+	
+	var target_def = 1.0 if current_state == State.DEFAULT else 0.0
+	var target_dash = 1.0 if current_state == State.DASHED else 0.0
+	var target_foc = 1.0 if current_state == State.FOCUSED else 0.0
+	
+	fade_tween.tween_property(self, "alpha_default", target_def, 0.2)
+	fade_tween.tween_property(self, "alpha_dashed", target_dash, 0.2)
+	fade_tween.tween_property(self, "alpha_focused", target_foc, 0.2)
+	
+	# Плавно скрываем/показываем статичные PNG картинки
+	if default_png:
+		default_png.show()
+		fade_tween.tween_property(default_png, "modulate:a", target_def, 0.2)
+	
+	# В конце анимации выключаем видимость полностью прозрачных PNG, чтобы экономить ресурсы
+	fade_tween.chain().tween_callback(func():
+		if current_state != State.DEFAULT and default_png: default_png.hide()
+	)
+
+func _draw():
+	var rect = Rect2(Vector2.ZERO, size)
+	
+	# 1. ПЛАВНЫЕ ФОНЫ (смешивание цветов)
+	var def_bg_alpha = max(alpha_default, alpha_dashed)
+	if def_bg_alpha > 0.0 and default_bg_texture:
+		draw_texture_rect(default_bg_texture, rect, false, Color(1, 1, 1, def_bg_alpha))
+		
+	if alpha_focused > 0.0 and focused_bg_texture:
+		draw_texture_rect(focused_bg_texture, rect, false, Color(1, 1, 1, alpha_focused))
+	
+	# 2. ПЛАВНАЯ ФОКУСНАЯ РАМКА
+	if alpha_focused > 0.0:
+		var mod_style = focused_style.duplicate()
+		mod_style.border_color.a = alpha_focused
+		draw_style_box(mod_style, rect)
+		
+	# 3. ПЛАВНЫЙ АНИМИРОВАННЫЙ ПУНКТИР
+	if alpha_dashed > 0.0:
+		var current_dash_color = dashed_color
+		current_dash_color.a = alpha_dashed
+		var inset = dashed_width / 2.0
+		var path_rect = Rect2(Vector2(inset, inset), size - Vector2(inset * 2, inset * 2))
+		var path_radius = corner_radius - inset
+		_draw_animated_dashed_rounded_rect(path_rect, path_radius, current_dash_color)
+
+# --- ЛОГИКА ОТРИСОВКИ ПУНКТИРА ---
+func _draw_animated_dashed_rounded_rect(rect: Rect2, r: float, color: Color):
+	var pts = _get_rounded_rect_points(rect, r, 10)
+	var total_length = 0.0
+	var lengths = []
+	for i in range(pts.size() - 1):
+		var d = pts[i].distance_to(pts[i+1])
+		lengths.append(d)
+		total_length += d
+
+	var cycle = dash + gap
+	var offset = fmod(dash_offset, cycle)
+	if offset < 0: offset += cycle
+
+	var current_dist = -offset
+	while current_dist < total_length:
+		var start_d = max(0.0, current_dist)
+		var end_d = min(total_length, current_dist + dash)
+		if end_d > start_d:
+			_draw_polyline_segment(pts, lengths, start_d, end_d, color)
+		current_dist += cycle
+
+func _draw_polyline_segment(pts: PackedVector2Array, lengths: Array, start_d: float, end_d: float, color: Color):
+	var segment_pts = PackedVector2Array()
+	var accumulated = 0.0
+	for i in range(pts.size() - 1):
+		var seg_start = accumulated
+		var seg_end = accumulated + lengths[i]
+		if end_d <= seg_start: break
+		if start_d >= seg_end:
+			accumulated = seg_end
+			continue
+		var t_start = clamp((start_d - seg_start) / lengths[i], 0.0, 1.0)
+		var t_end = clamp((end_d - seg_start) / lengths[i], 0.0, 1.0)
+		var p1 = pts[i].lerp(pts[i+1], t_start)
+		var p2 = pts[i].lerp(pts[i+1], t_end)
+		if segment_pts.is_empty(): 
+			segment_pts.append(p1)
+		elif segment_pts[segment_pts.size() - 1].distance_to(p1) > 0.1: 
+			segment_pts.append(p1)
+		segment_pts.append(p2)
+		accumulated = seg_end
+		
+	if segment_pts.size() >= 2:
+		draw_polyline(segment_pts, color, dashed_width, true)
+
+func _get_rounded_rect_points(rect: Rect2, r: float, points_per_arc: int) -> PackedVector2Array:
+	var pts = PackedVector2Array()
+	var w = rect.size.x
+	var h = rect.size.y
+	for i in range(points_per_arc + 1):
+		var angle = -PI/2 + (PI/2) * (float(i) / points_per_arc)
+		pts.append(Vector2(w - r, r) + Vector2(cos(angle), sin(angle)) * r + rect.position)
+	for i in range(points_per_arc + 1):
+		var angle = 0 + (PI/2) * (float(i) / points_per_arc)
+		pts.append(Vector2(w - r, h - r) + Vector2(cos(angle), sin(angle)) * r + rect.position)
+	for i in range(points_per_arc + 1):
+		var angle = PI/2 + (PI/2) * (float(i) / points_per_arc)
+		pts.append(Vector2(r, h - r) + Vector2(cos(angle), sin(angle)) * r + rect.position)
+	for i in range(points_per_arc + 1):
+		var angle = PI + (PI/2) * (float(i) / points_per_arc)
+		pts.append(Vector2(r, r) + Vector2(cos(angle), sin(angle)) * r + rect.position)
+	pts.append(pts[0])
+	return pts
+
+================================================================================
+FILE: res://Scenes/Item_3d.gd
+ROLE (кратко):
+Предмет в зелёной ячейке шкафа: текстура, эмит item_pressed, скрытие при драге.
+--------------------------------------------------------------------------------
+extends Node3D
+
+var item_id: int
+var texture_path: String
+
+func setup(id: int):
+	item_id = id
+	var item_data = ItemManager.items_db.get(id)
+	if item_data:
+		texture_path = item_data["texture"]
+		if has_node("Sprite3D"):
+			$Sprite3D.texture = load(texture_path)
+
+func _ready():
+	if has_node("Area3D"):
+		$Area3D.input_event.connect(_on_area_3d_input_event)
+
+func _on_area_3d_input_event(_camera, event, _position, _normal, _shape_idx):
+	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
+		if event.pressed:
+			# Передаем ссылку на себя (self)
+			ItemManager.item_pressed.emit(item_id, texture_path, self)
+
+# --- НОВЫЕ ФУНКЦИИ ДЛЯ ПРЯТАНЬЯ ПРЕДМЕТА ---
+func hide_item():
+	if has_node("Sprite3D"):
+		$Sprite3D.hide()
+
+func show_item():
+	if has_node("Sprite3D"):
+		$Sprite3D.show()
+
+================================================================================
+FILE: res://Scenes/cell_red.gd
+ROLE (кратко):
+Красная ячейка: открытие дверей, разблокировка дочерней монеты.
+--------------------------------------------------------------------------------
+extends Node3D
+
+@export var door_left: Node3D
+@export var door_right: Node3D
+
+func open_doors():
+	if door_left and door_right:
+		var tw = create_tween().set_parallel(true).set_trans(Tween.TRANS_BOUNCE).set_ease(Tween.EASE_OUT)
+		tw.tween_property(door_left, "rotation_degrees:y", -100.0, 1.2)
+		tw.tween_property(door_right, "rotation_degrees:y", 100.0, 1.2)
+		tw.chain().tween_callback(_unlock_coin)
+
+func _unlock_coin():
+	for child in get_children():
+		if child.has_method("unlock"):
+			child.unlock()
+
+================================================================================
+FILE: res://Scenes/coin_3d.gd
+ROLE (кратко):
+Клик по монете: немедленный on_coin_collected у шкафа, вылет и полёт вверх.
+--------------------------------------------------------------------------------
+extends Node3D
+
+var is_collected = false
+var is_unlocked = false
+
+func _ready():
+	if has_node("Area3D"):
+		$Area3D.input_event.connect(_on_input_event)
+
+func unlock():
+	is_unlocked = true
+
+func _on_input_event(_camera, event, _position, _normal, _shape_idx):
+	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and event.pressed:
+		if is_unlocked and not is_collected:
+			is_collected = true
+			call_deferred("collect_coin")
+
+func collect_coin():
+	if not is_inside_tree(): return
+	
+	var main_scene = get_tree().current_scene
+	
+	# Ищем шкаф, поднимаясь по родителям
+	var cabinet_node = get_parent()
+	while cabinet_node != null and not cabinet_node.has_method("reveal_next_bonus_cell"):
+		cabinet_node = cabinet_node.get_parent()
+	
+	if cabinet_node == null:
+		printerr("ОШИБКА: Шкаф не найден! Анимация отменена.")
+		is_collected = false
+		return
+
+	# Запоминаем колонку ДО того как перепривяжемся к main_scene.
+	# Метаданные "cabinet_col" устанавливаются шкафом в reveal_next_bonus_cell.
+	var my_col: int = -1
+	var parent_cell = get_parent()
+	if parent_cell and parent_cell.has_meta("cabinet_col"):
+		my_col = parent_cell.get_meta("cabinet_col")
+
+	# Вычисляем направление от центра шкафа к монетке (только по XZ).
+	var direction_out = global_position - cabinet_node.global_position
+	direction_out.y = 0
+	if direction_out.length_squared() < 0.0001:
+		direction_out = -global_basis.z
+		direction_out.y = 0
+	direction_out = direction_out.normalized()
+	
+	var out_distance = 1.2
+	var final_out_pos = global_position + (direction_out * out_distance)
+
+	# Сообщаем шкафу СРАЗУ — поворот к следующей монете начинается параллельно с анимацией
+	if my_col >= 0 and is_instance_valid(cabinet_node) and cabinet_node.has_method("on_coin_collected"):
+		cabinet_node.on_coin_collected(my_col)
+
+	var tw = create_tween().set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+	
+	# Отрываем от шкафа (перепривязка к main_scene для свободного полёта)
+	tw.tween_callback(func():
+		var old_global_transform = global_transform
+		if get_parent():
+			get_parent().remove_child(self)
+		main_scene.add_child(self)
+		global_transform = old_global_transform
+	)
+
+	# Шаг 1: Быстро выдвигаем из ячейки
+	tw.tween_property(self, "global_position", final_out_pos, 0.18)
+	tw.tween_interval(0.1)
+	
+	# Шаг 2: Летим вверх с вращением
+	var spin_degrees = 360.0
+	var up_distance = 10.0
+	tw.parallel().tween_property(self, "global_position:y", final_out_pos.y + up_distance, 1.2)
+	tw.parallel().tween_property(self, "rotation_degrees:y", rotation_degrees.y + spin_degrees, 1.2).set_ease(Tween.EASE_IN_OUT)
+	
+	tw.tween_callback(queue_free)
+
+================================================================================
+FILE: res://Scenes/cabinet.gd
+ROLE (кратко):
+Шкаф: торнадо-сборка, свайп с deadzone и снапом, бонусные ячейки, очередь монет.
+--------------------------------------------------------------------------------
+extends Node3D
+
+const COLUMNS: int = 8
+const STEP_ANGLE: float = deg_to_rad(45.0)
+const ROWS: int = 5
+const CELL_HEIGHT: float = 1.25
+const VERTICAL_SPACING: float = 1.6
+const BLENDER_RADIUS: float = 1.88
+const CAP_FIT_RADIUS: float = 1.9
+const CAP_BOTTOM_Y: float = -1.3
+const CAP_TOP_Y_MARGIN: float = 0.0
+
+@export_group("Параметры анимации")
+@export var cell_fly_duration: float = 1.2
+@export var spawn_distance_min: float = 15.0
+@export var spawn_distance_max: float = 30.0
+@export var total_rotation_degrees: float = 360.0
+
+@export_group("Поэтапная сборка")
+@export var delay_between_rows: float = 0.2
+@export var delay_between_cells_in_row: float = 0.05
+
+@export_group("ГЕОМЕТРИЯ (Стыковка)")
+@export var width_scale: float = 1.01
+@export var geometric_radial_offset: float = 0.0
+@export var manual_mesh_width: float = 2.0
+
+@export_group("Интерполяция")
+@export var trans_type: Tween.TransitionType = Tween.TRANS_CUBIC
+@export var ease_type: Tween.EaseType = Tween.EASE_OUT
+
+@export_group("Интерактив (iOS Style)")
+@export var sensitivity: float = 0.2
+@export var throw_momentum_factor: float = 1.5
+@export var friction: float = 0.94
+@export var snap_velocity_limit: float = 0.08
+
+@export_group("Хаптик (Сейф)")
+@export var haptics_enabled: bool = true
+@export var haptic_click_ms: int = 10
+
+const DRAG_DEADZONE: float = 15.0
+const FLICK_THRESHOLD: float = 600.0   # пикс/сек — быстрее → шкаф перелетает к следующей грани
+const FLICK_MAX_FACES: int = 3         # макс. граней за один флик
+
+var can_rotate: bool = false
+var is_dragging: bool = false
+var is_swipe_confirmed: bool = false
+var drag_start_pos_v: Vector2 = Vector2.ZERO
+var angular_velocity: float = 0.0
+var last_frame_x: float = 0.0
+var snap_tween: Tween
+var last_haptic_index: int = 0
+var _accumulated_drag: float = 0.0
+var _recent_velocities: Array = []
+
+var red_cell_scene = preload("res://Scenes/Cell_Red.tscn")
+var green_cell_scene = preload("res://Scenes/Cell_Green.tscn")
+var cap_scene = preload("res://Scenes/Top_Down.tscn")
+var item_3d_scene = preload("res://Scenes/Item_3d.tscn")
+
+var active_red_cells = []
+var focus_tween: Tween
+var bonus_reveal_speed_multiplier: float = 1.0
+
+# --- Последовательность сбора монет ---
+var unlocked_coin_cols: Array = []  # Отсортированный список колонок с открытыми монетами
+var coin_seq_tween: Tween
+var bonus_post_open_delay_multiplier: float = 1.0
+var bonus_fixed_post_open_delay: float = -1.0
+
+func set_bonus_reveal_speed_multiplier(mult: float) -> void:
+	bonus_reveal_speed_multiplier = max(mult, 0.01)
+
+func set_bonus_post_open_delay_multiplier(mult: float) -> void:
+	bonus_post_open_delay_multiplier = max(mult, 0.01)
+
+func set_bonus_fixed_post_open_delay(seconds: float) -> void:
+	bonus_fixed_post_open_delay = seconds
+
+func _ready() -> void:
+	hide()
+
+func _process(_delta: float) -> void:
+	if not can_rotate: return
+	if snap_tween and snap_tween.is_running():
+		_check_haptic_click()
+
+func _input(event: InputEvent) -> void:
+	if not can_rotate: return
+
+	# === RELEASE (mouse + touch) ===
+	var is_release := false
+	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and not event.pressed:
+		is_release = true
+	if event is InputEventScreenTouch and not event.pressed:
+		is_release = true
+	if is_release:
+		is_dragging = false
+		if is_swipe_confirmed:
+			_snap_with_inertia()
+		is_swipe_confirmed = false
+		return
+
+	# Если идёт перетаскивание предмета из шкафа в рюкзак — не вращаем
+	if ItemManager.is_dragging_item:
+		is_dragging = false
+		is_swipe_confirmed = false
+		return
+
+	# === PRESS ===
+	if (event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT) \
+		or event is InputEventScreenTouch:
+		if event.pressed:
+			is_dragging = false
+			is_swipe_confirmed = false
+			drag_start_pos_v = event.position
+			last_frame_x = event.position.x
+			_accumulated_drag = 0.0
+			_recent_velocities.clear()
+			angular_velocity = 0.0
+			_stop_snap()
+
+	# === DRAG / MOTION ===
+	if event is InputEventMouseMotion or event is InputEventScreenDrag:
+		if not Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT):
+			return
+		is_dragging = true
+
+		if not is_swipe_confirmed:
+			_accumulated_drag += abs(event.relative.x) + abs(event.relative.y)
+			if _accumulated_drag >= DRAG_DEADZONE:
+				var diff = event.position - drag_start_pos_v
+				if abs(diff.x) > abs(diff.y):
+					is_swipe_confirmed = true
+					last_frame_x = event.position.x
+				else:
+					is_dragging = false
+					return
+
+		if is_swipe_confirmed:
+			var delta_x = event.position.x - last_frame_x
+			rotate_y(deg_to_rad(delta_x * sensitivity))
+			last_frame_x = event.position.x
+
+			var dt := get_process_delta_time()
+			if dt > 0.0:
+				_recent_velocities.append(delta_x / dt)
+				if _recent_velocities.size() > 5:
+					_recent_velocities.remove_at(0)
+
+			_check_haptic_click()
+
+func _check_haptic_click() -> void:
+	if not haptics_enabled: return
+	var current_index = int(round(rotation.y / STEP_ANGLE))
+	if current_index != last_haptic_index:
+		Input.vibrate_handheld(haptic_click_ms)
+		last_haptic_index = current_index
+
+func _start_snap() -> void:
+	var target_rot = round(rotation.y / STEP_ANGLE) * STEP_ANGLE
+	if abs(rotation.y - target_rot) < 0.001: return
+	_stop_snap()
+	snap_tween = create_tween()
+	snap_tween.tween_property(self, "rotation:y", target_rot, 0.4).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+	snap_tween.finished.connect(func(): _check_haptic_click())
+	angular_velocity = 0.0
+
+func _stop_snap() -> void:
+	if snap_tween: snap_tween.kill()
+
+func _snap_with_inertia() -> void:
+	var avg_vel: float = 0.0
+	if _recent_velocities.size() > 0:
+		for v in _recent_velocities:
+			avg_vel += v
+		avg_vel /= _recent_velocities.size()
+	_recent_velocities.clear()
+
+	# Сколько граней пропустить по инерции
+	var face_offset: int = 0
+	if abs(avg_vel) > FLICK_THRESHOLD:
+		face_offset = clampi(int(avg_vel / FLICK_THRESHOLD), -FLICK_MAX_FACES, FLICK_MAX_FACES)
+
+	var nearest: float = round(rotation.y / STEP_ANGLE) * STEP_ANGLE
+	var target: float = nearest + float(face_offset) * STEP_ANGLE
+
+	# Длительность зависит от расстояния, но с ограничениями
+	var angle_dist: float = abs(target - rotation.y)
+	var duration := clampf(angle_dist / deg_to_rad(90.0) * 0.3, 0.15, 0.5)
+
+	angular_velocity = 0.0
+	_stop_snap()
+	snap_tween = create_tween()
+	snap_tween.tween_property(self, "rotation:y", target, duration)\
+		.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+	snap_tween.finished.connect(func(): _check_haptic_click())
+
+func _get_camera_angle_xz(default_angle: float = PI / 2.0) -> float:
+	var cam = get_viewport().get_camera_3d()
+	var cam_angle = default_angle
+	if cam:
+		var to_cam = cam.global_position - global_position
+		to_cam.y = 0.0
+		if to_cam.length_squared() > 0.0001:
+			cam_angle = atan2(to_cam.z, to_cam.x)
+	return cam_angle
+
+func focus_item_face_to_camera(item_node: Node3D, duration: float = 0.35, force: bool = false) -> void:
+	if item_node == null or not is_instance_valid(item_node):
+		return
+	var cell = item_node.get_parent()
+	if cell == null or not is_instance_valid(cell):
+		return
+	
+	var cell_pos = cell.global_position - global_position
+	cell_pos.y = 0.0
+	if cell_pos.length_squared() <= 0.0001:
+		return
+	
+	var col_world_angle = atan2(cell_pos.z, cell_pos.x)
+	var cam_angle = _get_camera_angle_xz()
+	var diff = wrapf(col_world_angle - cam_angle, -PI, PI)
+	
+	if not force and abs(diff) < deg_to_rad(8.0):
+		return
+	# При force=true всё равно не трогаем шкаф если он уже точно смотрит в камеру
+	if abs(diff) < deg_to_rad(0.5):
+		return
+
+	_stop_snap()
+	if focus_tween and focus_tween.is_running():
+		focus_tween.kill()
+	angular_velocity = 0.0
+	focus_tween = create_tween().set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+	focus_tween.tween_property(self, "rotation:y", rotation.y + diff, duration)
+
+func build_cabinet_tornado() -> void:
+	for child in get_children():
+		child.queue_free()
+		
+	show()
+	can_rotate = false
+	active_red_cells.clear()
+	unlocked_coin_cols.clear()
+	
+	var spawn_list = []
+	for order_item in ItemManager.current_order:
+		spawn_list.append(order_item["id"])
+	if spawn_list == null or spawn_list.is_empty():
+		printerr("build_cabinet_tornado: spawn_list пуст. Проверь генерацию заказа и загрузку items_db.")
+		return
+
+	var all_ids = ItemManager.items_db.keys()
+	if all_ids == null or all_ids.is_empty():
+		printerr("build_cabinet_tornado: items_db пуст (all_ids пуст). Проверь пути/регистр в Items/Data и ресурсы .tres.")
+		return
+	while spawn_list.size() < (ROWS * COLUMNS):
+		spawn_list.append(all_ids[randi() % all_ids.size()])
+	spawn_list.shuffle()
+	
+	var all_indices = []
+	for i in range(ROWS * COLUMNS): all_indices.append(i)
+	all_indices.shuffle()
+	var bonus_indices = all_indices.slice(0, 3)
+	
+	var tangential_max_width = 2.0 * BLENDER_RADIUS * tan(STEP_ANGLE / 2.0)
+	var target_scale_x = (tangential_max_width / manual_mesh_width) * width_scale
+	var final_radial_position = BLENDER_RADIUS + geometric_radial_offset
+	var total_assembly_time = (ROWS * delay_between_rows) + (COLUMNS * delay_between_cells_in_row) + cell_fly_duration
+	
+	rotation.y = 0
+	last_haptic_index = 0
+	
+	var cabinet_tween = create_tween()
+	cabinet_tween.tween_property(self, "rotation:y", deg_to_rad(total_rotation_degrees), total_assembly_time)\
+		.set_trans(trans_type).set_ease(ease_type)
+	cabinet_tween.finished.connect(func(): can_rotate = true)
+	
+	for row in range(ROWS):
+		var current_row_delay = row * delay_between_rows
+		var row_y = float(row) * CELL_HEIGHT * VERTICAL_SPACING
+		
+		for i in range(COLUMNS):
+			var current_index = row * COLUMNS + i
+			var is_red = current_index in bonus_indices
+			
+			var angle: float = float(i) * STEP_ANGLE
+			var target_pos := Vector3(cos(angle) * final_radial_position, row_y, sin(angle) * final_radial_position)
+
+			var cell
+			if is_red:
+				cell = red_cell_scene.instantiate()
+				active_red_cells.append({"cell": cell, "col": i})
+				# В красную ячейку предмет НЕ добавляем! Монетка там уже есть по умолчанию.
+			else:
+				cell = green_cell_scene.instantiate()
+				# В зелёную ячейку добавляем предмет
+				var item_node = item_3d_scene.instantiate()
+				cell.add_child(item_node)
+				item_node.setup(spawn_list[current_index])
+				item_node.position = Vector3(0, 0, 0.1)
+				
+			add_child(cell)
+			
+			cell.scale = Vector3(0.001, 0.001, 0.001)
+			
+			var random_spawn_dist = randf_range(spawn_distance_min, spawn_distance_max)
+			var spawn_radius = final_radial_position + random_spawn_dist
+			cell.position = Vector3(cos(angle) * spawn_radius, row_y, sin(angle) * spawn_radius)
+			cell.rotation = Vector3(0, -angle, 0)
+			
+			var individual_delay = current_row_delay + (i * delay_between_cells_in_row)
+			var t = create_tween().set_parallel(true)
+			t.tween_property(cell, "position", target_pos, cell_fly_duration)\
+				.set_trans(trans_type).set_ease(ease_type).set_delay(individual_delay)
+			t.tween_property(cell, "scale", Vector3(target_scale_x, 1.0, 1.0), cell_fly_duration)\
+				.set_trans(trans_type).set_ease(ease_type).set_delay(individual_delay)
+
+	_place_caps_sync(total_assembly_time)
+
+func reveal_next_bonus_cell(callback: Callable):
+	if active_red_cells.size() == 0:
+		callback.call()
+		return
+		
+	var data = active_red_cells.pop_front()
+	var cell = data["cell"]
+	var col: int = data["col"]
+	
+	_stop_snap()
+	# Убиваем focus tween — иначе он будет конфликтовать с поворотом кинематики
+	if focus_tween and focus_tween.is_running():
+		focus_tween.kill()
+	can_rotate = false
+	is_dragging = false
+	angular_velocity = 0.0
+	
+	# Угол камеры относительно центра шкафа в XZ-плоскости.
+	var cam_angle = _get_camera_angle_xz()
+	
+	# Ячейка col стоит на цилиндре под локальным углом col * STEP_ANGLE.
+	# При rotation.y = R мировой угол ячейки = col_angle - R (из матрицы поворота Godot).
+	# Приравниваем к cam_angle: col_angle - R = cam_angle => R = col_angle - cam_angle.
+	var target_rot = float(col) * STEP_ANGLE - cam_angle
+	var diff = angle_difference(rotation.y, target_rot)
+	
+	if abs(diff) < deg_to_rad(5.0):
+		diff += TAU
+	
+	var final_angle = rotation.y + diff
+	
+	var reveal_duration = 1.2 / bonus_reveal_speed_multiplier
+	var post_open_delay = 1.3 / (bonus_reveal_speed_multiplier * bonus_post_open_delay_multiplier)
+	if bonus_fixed_post_open_delay >= 0.0:
+		post_open_delay = bonus_fixed_post_open_delay
+	var tw = create_tween().set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
+	tw.tween_property(self, "rotation:y", final_angle, reveal_duration) 
+	tw.tween_callback(func():
+		# Метаданные и регистрация — вне проверки open_doors,
+		# чтобы монетка всегда могла найти свою колонку.
+		if is_instance_valid(cell):
+			cell.set_meta("cabinet_col", col)
+			_register_coin_col(col)
+			if cell.has_method("open_doors"):
+				cell.open_doors()
+
+		get_tree().create_timer(post_open_delay).timeout.connect(func():
+			can_rotate = true
+			angular_velocity = 0.0
+			callback.call()
+		)
+	)
+
+func _place_caps_sync(duration: float) -> void:
+	if cap_scene == null: return
+	var s_xz = BLENDER_RADIUS / CAP_FIT_RADIUS
+	var cap_scale = Vector3(s_xz, 1.0, s_xz)
+	var t = create_tween().set_parallel(true)
+
+	var bottom = cap_scene.instantiate() as Node3D
+	add_child(bottom)
+	bottom.scale = Vector3(0.001, 0.001, 0.001)
+	bottom.position = Vector3(0.0, CAP_BOTTOM_Y - 15.0, 0.0)
+	t.tween_property(bottom, "position", Vector3(0.0, CAP_BOTTOM_Y, 0.0), duration).set_trans(trans_type).set_ease(ease_type)
+	t.tween_property(bottom, "scale", cap_scale, duration).set_trans(trans_type).set_ease(ease_type)
+
+	var top = cap_scene.instantiate() as Node3D
+	add_child(top)
+	top.scale = Vector3(0.001, 0.001, 0.001)
+	var top_y = (float(ROWS - 1) * CELL_HEIGHT * VERTICAL_SPACING) + CELL_HEIGHT + CAP_TOP_Y_MARGIN
+	top.position = Vector3(0.0, top_y + 15.0, 0.0)
+	t.tween_property(top, "position", Vector3(0.0, top_y, 0.0), duration).set_trans(trans_type).set_ease(ease_type)
+	t.tween_property(top, "scale", cap_scale, duration).set_trans(trans_type).set_ease(ease_type)
+
+# =============================================================
+# ПОСЛЕДОВАТЕЛЬНОСТЬ СБОРА МОНЕТ (всегда слева направо)
+# =============================================================
+
+# Регистрируем открытую ячейку с монетой в порядке колонок
+func _register_coin_col(col: int) -> void:
+	if not col in unlocked_coin_cols:
+		unlocked_coin_cols.append(col)
+		unlocked_coin_cols.sort()  # Сортируем по возрастанию → слева направо
+
+# Вызывается из coin_3d.gd после завершения анимации сбора монеты.
+# Следующей всегда становится ячейка ПРАВЕЕ собранной (по возрастанию колонки),
+# а если правее ничего нет — переходим к крайней левой из оставшихся.
+func on_coin_collected(col: int) -> void:
+	var idx := unlocked_coin_cols.find(col)
+	if idx < 0:
+		return  # Монетка уже не в списке — ничего не делаем
+	unlocked_coin_cols.remove_at(idx)
+
+	if unlocked_coin_cols.is_empty():
+		# Все монеты собраны — отпускаем управление шкафом
+		can_rotate = true
+		angular_velocity = 0.0
+		return
+
+	# После удаления idx указывает ровно на следующую правую ячейку.
+	# Если были в конце списка — % оборачивает к крайней левой.
+	var next_col: int = unlocked_coin_cols[idx % unlocked_coin_cols.size()]
+	_rotate_to_coin_col(next_col)
+
+# Поворот к грани с монетой — всегда в положительном направлении (слева направо)
+func _rotate_to_coin_col(next_col: int) -> void:
+	can_rotate = false
+	_stop_snap()
+	if focus_tween and focus_tween.is_running(): focus_tween.kill()
+	if coin_seq_tween and coin_seq_tween.is_running(): coin_seq_tween.kill()
+	angular_velocity = 0.0
+
+	var cam_angle := _get_camera_angle_xz()
+	var target_rot := float(next_col) * STEP_ANGLE - cam_angle
+
+	# Положительный поворот (слева направо): используем wrapf в [0, TAU).
+	var diff := wrapf(target_rot - rotation.y, 0.0, TAU)
+	# Если уже смотрим на эту монетку — не крутим, игрок сразу видит её.
+	if diff < deg_to_rad(3.0):
+		return
+
+	coin_seq_tween = create_tween().set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
+	coin_seq_tween.tween_property(self, "rotation:y", rotation.y + diff, 0.7)
+
+================================================================================
+FILE: res://Scenes/main_scene.gd
+ROLE (кратко):
+Оркестрация: старт игры, драг из шкафа в рюкзак, autofill, fly_back, кино бонусов.
+--------------------------------------------------------------------------------
+extends Node3D
+
+@onready var order_popup = $UILayer/Order_PopUp
+@onready var env_back = $UILayer/Order_PopUp/EnvelopeBack
+@onready var env_front = $UILayer/Order_PopUp/EnvelopeFront
+@onready var letter = $UILayer/Order_PopUp/LetterContainer
+@onready var start_button = $UILayer/Start_Button
+@onready var ready_button = $UILayer/Ready_Button
+@onready var timer_label = $UILayer/Order_PopUp/LetterContainer/LetterPaper/Timer
+@onready var side_widget = $UILayer/SideWidget
+@onready var backpack_widget = $UILayer/BackpackWidget
+@onready var drag_preview = $UILayer/DragPreview
+@onready var autofill_button = get_node_or_null("UILayer/AutofillButton")
+
+@export_group("Ссылки на объекты")
+@export var cabinet: Node3D
+
+@export_group("Настройки Времени")
+@export var total_time: float = 10.0
+
+@export_group("Конверт (Envelope)")
+@export var env_intro_fade: float = 0.2
+@export var env_intro_start_y: float = 2300.0
+@export var env_intro_end_y: float = 1800.0
+@export var env_intro_duration: float = 1.0
+@export var env_intro_trans: Tween.TransitionType = Tween.TRANS_CIRC
+@export var env_intro_ease: Tween.EaseType = Tween.EASE_OUT
+@export var env_outro_fade: float = 0.3
+@export var env_outro_end_y: float = 2300.0
+@export var env_outro_duration: float = 0.8
+@export var env_outro_trans: Tween.TransitionType = Tween.TRANS_CIRC
+@export var env_outro_ease: Tween.EaseType = Tween.EASE_IN
+
+@export_group("Письмо (Letter)")
+@export var let_intro_delay: float = 0.3
+@export var let_intro_fade: float = 0.2
+@export var let_intro_start_y: float = -2000.0
+@export var let_intro_end_y: float = 500.0 
+@export var let_intro_start_scale_y: float = 0.1
+@export var let_intro_end_scale_y: float = 1.0
+@export var let_intro_duration: float = 0.5
+@export var let_intro_trans: Tween.TransitionType = Tween.TRANS_CIRC
+@export var let_intro_ease: Tween.EaseType = Tween.EASE_OUT
+@export var let_outro_delay: float = 0.0
+@export var let_outro_fade: float = 0.3
+@export var let_outro_end_y: float = -2000.0
+@export var let_outro_start_scale_y: float = 1.0
+@export var let_outro_end_scale_y: float = 0.5
+@export var let_outro_duration: float = 0.5
+@export var let_outro_trans: Tween.TransitionType = Tween.TRANS_CIRC
+@export var let_outro_ease: Tween.EaseType = Tween.EASE_IN
+
+var time_left: float
+var is_timer_active: bool = false
+var is_game_started: bool = false
+
+var potential_drag_id: int = -1
+var potential_drag_tex: String = ""
+var potential_drag_node: Node3D = null 
+var current_drag_node: Node3D = null   
+var drag_start_pos: Vector2 = Vector2.ZERO
+var fly_tween: Tween
+var inner_fly_tween: Tween
+var fly_back_gen: int = 0
+const DRAG_THRESHOLD: float = 15.0 
+
+var cinematic_queue: int = 0
+var is_cinematic_playing: bool = false
+var is_autofill_animating: bool = false
+var fast_cinematic_count: int = 0
+var autofill_cab_tween: Tween
+
+func _ready():
+	if start_button: start_button.pressed.connect(_on_start_pressed)
+	if ready_button: ready_button.pressed.connect(_on_ready_pressed)
+	if autofill_button:
+		autofill_button.pressed.connect(_on_autofill_pressed)
+		autofill_button.hide()
+	
+	ready_button.modulate.a = 0.0; ready_button.hide()
+	env_back.modulate.a = 0.0; env_front.modulate.a = 0.0; letter.modulate.a = 0.0
+	
+	if side_widget: side_widget.hide()
+	if backpack_widget: backpack_widget.hide()
+	if drag_preview: drag_preview.hide()
+	if cabinet: cabinet.hide()
+		
+	ItemManager.item_pressed.connect(_on_item_pressed)
+	
+	# Замыкаем цепь комбо-системы
+	if not ItemManager.bonus_cell_unlocked.is_connected(_on_bonus_cell_unlocked):
+		ItemManager.bonus_cell_unlocked.connect(_on_bonus_cell_unlocked)
+
+func _on_bonus_cell_unlocked():
+	cinematic_queue += 1
+
+func _process(delta):
+	if is_timer_active and time_left > 0:
+		time_left -= delta
+		if timer_label: timer_label.text = str(ceil(time_left)) + "s"
+		if time_left <= 0: _on_timer_timeout()
+			
+	if cinematic_queue > 0 and not is_cinematic_playing and not ItemManager.is_dragging_item and not is_autofill_animating:
+		_play_next_cinematic()
+
+func _play_next_cinematic():
+	is_cinematic_playing = true
+	cinematic_queue -= 1
+	if cabinet and cabinet.has_method("reveal_next_bonus_cell"):
+		var use_fast = fast_cinematic_count > 0
+		if use_fast:
+			fast_cinematic_count -= 1
+		if cabinet.has_method("set_bonus_reveal_speed_multiplier"):
+			cabinet.set_bonus_reveal_speed_multiplier(2.0 if use_fast else 1.0)
+		if cabinet.has_method("set_bonus_post_open_delay_multiplier"):
+			cabinet.set_bonus_post_open_delay_multiplier(2.0 if use_fast else 1.0)
+		if cabinet.has_method("set_bonus_fixed_post_open_delay"):
+			cabinet.set_bonus_fixed_post_open_delay(0.25 if use_fast else -1.0)
+		cabinet.reveal_next_bonus_cell(func(): is_cinematic_playing = false)
+	else:
+		is_cinematic_playing = false
+
+func _find_cabinet_item_node(parent_node: Node, target_id: int) -> Node3D:
+	if parent_node == null: return null
+	if "id" in parent_node and parent_node.get("id") == target_id: return parent_node as Node3D
+	if "item_id" in parent_node and parent_node.get("item_id") == target_id: return parent_node as Node3D
+	for child in parent_node.get_children():
+		var found = _find_cabinet_item_node(child, target_id)
+		if found: return found
+	return null
+
+func _on_autofill_pressed():
+	if not is_game_started or not backpack_widget or is_cinematic_playing or is_autofill_animating: return
+	if ItemManager.is_dragging_item or backpack_widget.is_dragging_internal: return
+
+	var required_ids = []
+	for task in ItemManager.current_order:
+		if not task["found"]: required_ids.append(task["id"])
+
+	if required_ids.size() == 0: return
+	var placements = backpack_widget.auto_fill_and_optimize(required_ids)
+	if placements.size() == 0: return 
+	
+	is_autofill_animating = true
+
+	var fly_data_array = []
+	for place_data in placements:
+		var id = place_data["id"]
+		var cab_node = _find_cabinet_item_node(cabinet, id)
+		fly_data_array.append({
+			"id": id, "cell": place_data["cell"], "cab_node": cab_node,
+			"start_y": cab_node.global_position.y if cab_node else -9999.0
+		})
+		# Сохраняем ссылку на 3D-узел чтобы fly_back_to_cabinet работал корректно
+		if cab_node and is_instance_valid(cab_node) and is_instance_valid(place_data["cell"]):
+			place_data["cell"].set_meta("source_drag_node", cab_node)
+
+	fly_data_array.sort_custom(func(a, b): return a["start_y"] > b["start_y"])
+
+	var total_anim_time = 1.0 + (fly_data_array.size() * 0.15)
+	if cabinet:
+		if autofill_cab_tween and autofill_cab_tween.is_running():
+			autofill_cab_tween.kill()
+		autofill_cab_tween = create_tween().set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
+		autofill_cab_tween.tween_property(cabinet, "rotation_degrees:y", cabinet.rotation_degrees.y + 720.0, total_anim_time)
+
+	var cam = get_viewport().get_camera_3d()
+	var queue_before = cinematic_queue
+	for i in range(fly_data_array.size()):
+		var data = fly_data_array[i]
+		var id = data["id"]; var target_cell = data["cell"]; var cab_node = data["cab_node"]
+
+		ItemManager.mark_item_as_found(id)
+
+		var tex_path = ItemManager.items_db[id]["texture"]
+		var fly_icon = TextureRect.new()
+		fly_icon.texture = load(tex_path); fly_icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		fly_icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+		fly_icon.size = target_cell.size; fly_icon.pivot_offset = fly_icon.size / 2.0
+		fly_icon.z_index = 100; fly_icon.modulate.a = 0.0 
+		$UILayer.add_child(fly_icon)
+
+		var target_pos = target_cell.global_position; var target_rot = target_cell.get_meta("rot_deg", 0)
+
+		var start_tw = create_tween()
+		start_tw.tween_interval(i * 0.15)
+		start_tw.tween_callback(func():
+			var start_pos = get_viewport().get_visible_rect().size / 2.0
+			if cab_node:
+				if cab_node.has_method("hide_item"): cab_node.hide_item()
+				else: cab_node.hide()
+				if cam: start_pos = cam.unproject_position(cab_node.global_position)
+			
+			fly_icon.global_position = start_pos - (fly_icon.size / 2.0); fly_icon.modulate.a = 1.0
+			var anim_tw = create_tween().set_parallel(true).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
+			anim_tw.tween_property(fly_icon, "global_position", target_pos, 0.4)
+			anim_tw.tween_property(fly_icon, "rotation_degrees", target_rot, 0.4)
+			anim_tw.chain().tween_callback(func():
+				fly_icon.queue_free()
+				if is_instance_valid(target_cell) and target_cell.has_node("ItemIcon"):
+					target_cell.get_node("ItemIcon").show()
+			)
+		)
+	var added_cinematics = cinematic_queue - queue_before
+	if added_cinematics > 0:
+		fast_cinematic_count += added_cinematics
+
+	if autofill_button:
+		var tw = create_tween().set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+		tw.tween_property(autofill_button, "modulate:a", 0.0, 0.3)
+		tw.tween_callback(autofill_button.hide)
+		
+	get_tree().create_timer(total_anim_time).timeout.connect(func(): is_autofill_animating = false)
+
+func _on_item_pressed(id: int, tex: String, node: Node3D):
+	if is_cinematic_playing: return 
+	potential_drag_id = id; potential_drag_tex = tex; potential_drag_node = node
+	drag_start_pos = get_viewport().get_mouse_position()
+
+func _input(event):
+	if is_cinematic_playing: return 
+	
+	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and not event.pressed:
+		if potential_drag_id != -1:
+			if ItemManager.is_dragging_item: _perform_drop()
+			else: _reset_drag_instant() 
+
+	if event is InputEventMouseMotion and potential_drag_id != -1:
+		if not ItemManager.is_dragging_item:
+			var diff = event.position - drag_start_pos
+			if diff.length() > DRAG_THRESHOLD:
+				if abs(diff.y) > abs(diff.x): _start_drag() 
+				else: _reset_drag_instant() 
+		else:
+			if backpack_widget and backpack_widget.has_method("update_external_drag_preview"):
+				backpack_widget.update_external_drag_preview(event.position)
+
+func _start_drag():
+	if fly_tween and fly_tween.is_running(): fly_tween.kill()
+	ItemManager.is_dragging_item = true
+	current_drag_node = potential_drag_node
+	if cabinet and cabinet.has_method("focus_item_face_to_camera") and current_drag_node and not is_cinematic_playing:
+		cabinet.focus_item_face_to_camera(current_drag_node, 0.35)
+	if current_drag_node and current_drag_node.has_method("hide_item"): current_drag_node.hide_item()
+	if drag_preview: drag_preview.hide() 
+	if backpack_widget and backpack_widget.has_method("show_external_drag_preview"):
+		backpack_widget.show_external_drag_preview(potential_drag_id, get_viewport().get_mouse_position())
+
+func _perform_drop():
+	var mouse_pos = get_viewport().get_mouse_position()
+	var dropped_successfully = false
+	if backpack_widget and backpack_widget.get_global_rect().has_point(mouse_pos):
+		if backpack_widget.has_method("try_add_item"):
+			dropped_successfully = backpack_widget.try_add_item(potential_drag_id, mouse_pos, potential_drag_node)
+	if dropped_successfully: current_drag_node = null; _reset_drag_instant() 
+	else: _fly_back_and_cancel() 
+
+func _fly_back_and_cancel():
+	if autofill_cab_tween and autofill_cab_tween.is_running(): autofill_cab_tween.kill()
+	if inner_fly_tween and inner_fly_tween.is_running(): inner_fly_tween.kill()
+	if fly_tween and fly_tween.is_running(): fly_tween.kill()
+	fly_back_gen += 1
+	var my_gen := fly_back_gen
+	if backpack_widget and backpack_widget.has_method("hide_external_drag_preview"): backpack_widget.hide_external_drag_preview()
+	var node_to_return = current_drag_node
+	if drag_preview:
+		drag_preview.texture = load(potential_drag_tex)
+		drag_preview.custom_minimum_size = Vector2.ZERO
+		drag_preview.size = drag_preview.texture.get_size() if drag_preview.texture else Vector2.ZERO
+		drag_preview.global_position = get_viewport().get_mouse_position() - (drag_preview.size / 2.0)
+		drag_preview.show()
+		# Шаг 1: поворачиваем шкаф к нужной грани (принудительно)
+		const FOCUS_DUR := 0.2
+		if cabinet and cabinet.has_method("focus_item_face_to_camera") and node_to_return and not is_cinematic_playing:
+			cabinet.focus_item_face_to_camera(node_to_return, FOCUS_DUR, true)
+		# Шаг 2: ждём поворота, вычисляем проекцию ПОСЛЕ поворота, летим
+		fly_tween = create_tween().set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+		fly_tween.tween_interval(FOCUS_DUR)
+		fly_tween.tween_callback(func():
+			if my_gen != fly_back_gen: return  # Устарело — новый fly_back уже запущен
+			var cam = get_viewport().get_camera_3d()
+			var target_pos = drag_start_pos - (drag_preview.size / 2.0)
+			if cam and node_to_return and is_instance_valid(node_to_return):
+				target_pos = cam.unproject_position(node_to_return.global_position) - (drag_preview.size / 2.0)
+			inner_fly_tween = create_tween().set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+			inner_fly_tween.tween_property(drag_preview, "global_position", target_pos, 0.3)
+			inner_fly_tween.tween_callback(func():
+				if my_gen != fly_back_gen: return
+				drag_preview.hide(); drag_preview.texture = null
+				if node_to_return and is_instance_valid(node_to_return):
+					if node_to_return.has_method("show_item"): node_to_return.show_item()
+					else: node_to_return.show()
+			)
+		)
+	else:
+		if node_to_return and is_instance_valid(node_to_return):
+			if node_to_return.has_method("show_item"): node_to_return.show_item()
+			else: node_to_return.show()
+	current_drag_node = null
+	potential_drag_id = -1; potential_drag_node = null; ItemManager.is_dragging_item = false
+
+func _reset_drag_instant():
+	potential_drag_id = -1; potential_drag_node = null; ItemManager.is_dragging_item = false; _hide_preview_only()
+
+func _hide_preview_only():
+	if backpack_widget and backpack_widget.has_method("hide_external_drag_preview"): backpack_widget.hide_external_drag_preview()
+	if drag_preview: drag_preview.hide(); drag_preview.texture = null
+	if current_drag_node and current_drag_node.has_method("show_item"): current_drag_node.show_item()
+	current_drag_node = null
+
+func _on_start_pressed():
+	start_button.hide()
+	ItemManager.generate_new_order()
+	if order_popup.has_method("fill_order_icons"): order_popup.fill_order_icons()
+	is_game_started = false; time_left = total_time
+	
+	order_popup.position.y = env_intro_start_y; letter.position.y = let_intro_start_y; letter.scale.y = let_intro_start_scale_y
+	var tween = create_tween().set_parallel(true)
+	tween.tween_property(order_popup, "position:y", env_intro_end_y, env_intro_duration).set_trans(env_intro_trans).set_ease(env_intro_ease)
+	tween.tween_property(env_back, "modulate:a", 1.0, env_intro_fade); tween.tween_property(env_front, "modulate:a", 1.0, env_intro_fade)
+	tween.tween_property(letter, "position:y", let_intro_end_y, let_intro_duration).set_trans(let_intro_trans).set_ease(let_intro_ease).set_delay(let_intro_delay)
+	tween.tween_property(letter, "scale:y", let_intro_end_scale_y, let_intro_duration).set_trans(let_intro_trans).set_ease(let_outro_ease).set_delay(let_intro_delay)
+	tween.tween_property(letter, "modulate:a", 1.0, let_intro_fade).set_delay(let_intro_delay)
+	
+	await get_tree().create_timer(let_intro_delay + let_intro_duration).timeout
+	if !is_game_started: ready_button.show(); create_tween().tween_property(ready_button, "modulate:a", 1.0, 0.2); is_timer_active = true
+
+func _on_ready_pressed():
+	if is_game_started: return
+	is_timer_active = false; start_game_flow()
+
+func _on_timer_timeout():
+	if is_game_started: return
+	is_timer_active = false; start_game_flow()
+
+func start_game_flow():
+	is_game_started = true; ready_button.disabled = true
+	if cabinet: cabinet.build_cabinet_tornado()
+	var outro = create_tween().set_parallel(true)
+	outro.tween_property(order_popup, "position:y", env_outro_end_y, env_outro_duration).set_trans(env_outro_trans).set_ease(env_outro_ease)
+	outro.tween_property(env_back, "modulate:a", 0.0, env_outro_fade); outro.tween_property(env_front, "modulate:a", 0.0, env_outro_fade)
+	outro.tween_property(letter, "position:y", let_outro_end_y, let_outro_duration).set_trans(let_outro_trans).set_ease(let_outro_ease).set_delay(let_outro_delay)
+	outro.tween_property(letter, "scale:y", let_outro_end_scale_y, let_outro_duration).set_trans(let_outro_trans).set_ease(let_outro_ease).set_delay(let_outro_delay)
+	outro.tween_property(letter, "modulate:a", 0.0, let_outro_fade).set_delay(let_outro_delay)
+	outro.tween_property(ready_button, "modulate:a", 0.0, let_outro_fade)
+	
+	outro.chain().tween_callback(ready_button.hide)
+	outro.chain().tween_callback(func(): 
+		if side_widget: side_widget.start_appear_animation()
+		if backpack_widget: backpack_widget.start_appear_animation() 
+		if autofill_button: autofill_button.modulate.a = 1.0; autofill_button.show()
+	)
+
+func fly_back_to_cabinet(item_id: int, start_pos: Vector2, drag_node: Node3D):
+	if item_id == -1: ItemManager.is_dragging_item = false; return
+	if autofill_cab_tween and autofill_cab_tween.is_running(): autofill_cab_tween.kill()
+	if inner_fly_tween and inner_fly_tween.is_running(): inner_fly_tween.kill()
+	if fly_tween and fly_tween.is_running(): fly_tween.kill()
+	fly_back_gen += 1
+	var my_gen := fly_back_gen
+	ItemManager.is_dragging_item = false
+	if drag_preview:
+		var tex_path = ItemManager.items_db[item_id]["texture"]
+		drag_preview.texture = load(tex_path); drag_preview.custom_minimum_size = Vector2.ZERO
+		drag_preview.size = drag_preview.texture.get_size() if drag_preview.texture else Vector2.ZERO
+		drag_preview.global_position = start_pos - (drag_preview.size / 2.0); drag_preview.show()
+
+		# Шаг 1: сразу поворачиваем шкаф нужной гранью к камере (принудительно, без порога)
+		const FOCUS_DURATION := 0.2
+		if cabinet and cabinet.has_method("focus_item_face_to_camera") and drag_node and not is_cinematic_playing:
+			cabinet.focus_item_face_to_camera(drag_node, FOCUS_DURATION, true)
+
+		# Шаг 2: ждём поворота, затем летим точно в проекцию 3D-ячейки
+		fly_tween = create_tween().set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+		fly_tween.tween_interval(FOCUS_DURATION)
+		fly_tween.tween_callback(func():
+			if my_gen != fly_back_gen: return  # Устарело — новый fly_back уже запущен
+			var cam = get_viewport().get_camera_3d()
+			var target_pos = drag_start_pos - (drag_preview.size / 2.0)
+			if cam and drag_node and is_instance_valid(drag_node):
+				target_pos = cam.unproject_position(drag_node.global_position) - (drag_preview.size / 2.0)
+			inner_fly_tween = create_tween().set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+			inner_fly_tween.tween_property(drag_preview, "global_position", target_pos, 0.3)
+			inner_fly_tween.tween_callback(func():
+				if my_gen != fly_back_gen: return
+				drag_preview.hide(); drag_preview.texture = null
+				if drag_node:
+					if drag_node.has_method("show_item"): drag_node.show_item()
+					else: drag_node.show()
+			)
+		)
+	else:
+		if drag_node:
+			if drag_node.has_method("show_item"): drag_node.show_item()
+			else: drag_node.show()
+
+================================================================================
+FILE: res://Scenes/backpack_widget.gd
+ROLE (кратко):
+Рюкзак: размещение фигур, превью, swap, зависший предмет над сеткой, кнопки редактирования.
+--------------------------------------------------------------------------------
+extends Control
+
+@onready var backpack_bg = $BackpackBG
+@onready var grid = $BackpackBG/CenterContainer/GridContainer 
+@onready var edit_menu = get_node_or_null("EditMenu") 
+
+var hide_pos_offset = 600 
+
+var active_cell: Control = null
+var active_item_id: int = -1
+var active_drag_node: Node3D = null
+var active_shape: Array = []
+
+var is_dragging_internal: bool = false
+var drag_preview_container: Control
+
+const DRAG_OFFSET_Y: float = -80.0
+const FLOATING_OFFSET_Y: float = -30.0
+var target_preview_pos: Vector2 = Vector2.ZERO
+
+# «Зависший» предмет — не помещается в рюкзак, висит НАД ним
+var floating_item_id: int = -1
+var floating_drag_node: Node3D = null
+var floating_shape: Array = []
+var is_floating: bool = false
+
+func _ready():
+	hide()
+	modulate.a = 0.0
+	
+	if edit_menu:
+		edit_menu.hide()
+		if edit_menu.has_node("BtnRotate"): edit_menu.get_node("BtnRotate").pressed.connect(_on_btn_rotate)
+		if edit_menu.has_node("BtnConfirm"): edit_menu.get_node("BtnConfirm").pressed.connect(_on_btn_confirm)
+		if edit_menu.has_node("BtnCancel"): edit_menu.get_node("BtnCancel").pressed.connect(_on_btn_cancel)
+	
+	_setup_drag_preview()
+	grid.draw.connect(_on_grid_draw)
+	_update_grid_visuals()
+
+func _process(delta):
+	if drag_preview_container and drag_preview_container.visible:
+		drag_preview_container.global_position = drag_preview_container.global_position.lerp(
+			target_preview_pos, 25.0 * delta)
+
+# ==========================================================
+# --- АЛГОРИТМ АВТО-СБОРКИ (BIN PACKING) ---
+# ==========================================================
+func auto_fill_and_optimize(required_ids: Array) -> Array:
+	_close_edit_mode()
+
+	var existing_items = []
+	var processed_roots = []
+	for cell in grid.get_children():
+		if not cell.has_node("ItemIcon"): continue
+		var item_id = cell.get_meta("occupied_by_id", -1)
+		if item_id != -1:
+			var root = cell.get_meta("root_cell")
+			if not processed_roots.has(root):
+				processed_roots.append(root)
+				existing_items.append({
+					"id": item_id,
+					"old_root": root,
+					"old_shape": root.get_meta("current_shape"),
+					"old_rot": root.get_meta("rot_deg", 0)
+				})
+
+	# Сохраняем source_drag_node для существующих предметов до очистки сетки
+	var saved_drag_nodes: Dictionary = {}
+	for item in existing_items:
+		if item["old_root"].has_meta("source_drag_node"):
+			saved_drag_nodes[item["id"]] = item["old_root"].get_meta("source_drag_node")
+
+	var to_pack = []
+	for item in existing_items: to_pack.append({"id": item["id"], "is_new": false})
+	for id in required_ids: to_pack.append({"id": id, "is_new": true})
+
+	to_pack.sort_custom(func(a, b):
+		return ItemManager.items_db[a.id]["shape"].size() > ItemManager.items_db[b.id]["shape"].size()
+	)
+
+	_clear_entire_grid()
+
+	var successfully_added_new = []
+	var packing_failed = false
+
+	for pack_item in to_pack:
+		var placed = false
+		var item_id = pack_item.id
+		var base_shape = ItemManager.items_db[item_id]["shape"]
+
+		for r in range(4):
+			if placed: break
+			var test_shape = _rotate_shape_normalized(base_shape, r * 90)
+
+			for cell in grid.get_children():
+				if not cell.has_node("ItemIcon"): continue
+				if _can_place_shape(cell, test_shape):
+					_place_item_in_grid(cell, item_id, test_shape, r * 90)
+					placed = true
+					
+					if pack_item.is_new:
+						successfully_added_new.append({"id": item_id, "cell": cell})
+						# ВАЖНО: Прячем иконку! Она включится, когда долетит анимация из MainScene
+						cell.get_node("ItemIcon").hide()
+					else:
+						# Восстанавливаем ссылку на 3D-узел шкафа для существующих предметов
+						if saved_drag_nodes.has(item_id):
+							cell.set_meta("source_drag_node", saved_drag_nodes[item_id])
+					break
+
+		if not placed:
+			if not pack_item.is_new: 
+				packing_failed = true 
+				break 
+			else:
+				continue 
+
+	if packing_failed:
+		_clear_entire_grid()
+		for item in existing_items:
+			_place_item_in_grid(item.old_root, item.id, item.old_shape, item.old_rot)
+		print("Авто-сборка: Не хватает места для перетасовки!")
+		return []
+
+	if successfully_added_new.size() > 0 or existing_items.size() > 0:
+		backpack_bg.pivot_offset = backpack_bg.size / 2.0
+		var tw = create_tween().set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+		backpack_bg.scale = Vector2(0.95, 0.95)
+		tw.tween_property(backpack_bg, "scale", Vector2.ONE, 0.3)
+
+	return successfully_added_new
+
+func _clear_entire_grid():
+	var roots = []
+	for cell in grid.get_children():
+		if cell.has_node("ItemIcon"):
+			if not cell.has_meta("root_cell"):
+				continue
+			var r = cell.get_meta("root_cell")
+			if r and not roots.has(r):
+				roots.append(r)
+	for r in roots:
+		if r and r.has_meta("current_shape"):
+			_clear_item_from_grid(r, r.get_meta("current_shape"))
+
+func _rotate_shape_normalized(shape: Array, rot_deg: int) -> Array:
+	if rot_deg == 0: return shape.duplicate()
+	var steps = (rot_deg / 90) % 4
+	var current_shape = shape.duplicate()
+	for i in range(steps):
+		var next_shape = []
+		for p in current_shape: next_shape.append(Vector2(-p.y, p.x))
+		current_shape = next_shape
+
+	var min_x = 999; var min_y = 999
+	for p in current_shape:
+		if p.x < min_x: min_x = p.x
+		if p.y < min_y: min_y = p.y
+	for i in range(current_shape.size()):
+		current_shape[i] = Vector2(current_shape[i].x - min_x, current_shape[i].y - min_y)
+	return current_shape
+
+# ==========================================================
+# --- ИНДУСТРИАЛЬНЫЙ СТАНДАРТ ЦЕНТРОВКИ ИКОНОК ---
+# ==========================================================
+func _align_icon_in_bbox(icon: TextureRect, item_id: int, current_shape: Array, rot_deg: int):
+	if grid.get_child_count() == 0: return
+	var c_size = grid.get_child(0).size
+	var h_sep = grid.get_theme_constant("h_separation")
+	var v_sep = grid.get_theme_constant("v_separation")
+	var spacing = Vector2(max(0, h_sep), max(0, v_sep))
+
+	var orig_shape = ItemManager.items_db[item_id]["shape"]
+	var o_max_x = 0; var o_max_y = 0
+	for p in orig_shape:
+		if p.x > o_max_x: o_max_x = p.x
+		if p.y > o_max_y: o_max_y = p.y
+		
+	var orig_w = (o_max_x + 1) * c_size.x + o_max_x * spacing.x
+	var orig_h = (o_max_y + 1) * c_size.y + o_max_y * spacing.y
+
+	icon.size = Vector2(orig_w, orig_h)
+	icon.pivot_offset = icon.size / 2.0
+	icon.rotation_degrees = rot_deg
+
+	var c_max_x = 0; var c_max_y = 0
+	for p in current_shape:
+		if p.x > c_max_x: c_max_x = p.x
+		if p.y > c_max_y: c_max_y = p.y
+
+	var cur_w = (c_max_x + 1) * c_size.x + c_max_x * spacing.x
+	var cur_h = (c_max_y + 1) * c_size.y + c_max_y * spacing.y
+
+	var target_center = Vector2(cur_w, cur_h) / 2.0
+	icon.position = target_center - icon.pivot_offset
+
+# ==========================================================
+# --- МОНОЛИТНАЯ ОТРИСОВКА ---
+# ==========================================================
+func _get_merged_stylebox(shape: Array, offset: Vector2, is_focused: bool, is_preview: bool) -> StyleBoxFlat:
+	var style = StyleBoxFlat.new()
+	style.bg_color = Color("#401E0D") 
+	if is_preview: style.border_color = Color("#FFAE3C") 
+	else: style.border_color = Color("#ffffff") if is_focused else Color("#FFAE3C")
+	style.set_border_width_all(6)
+	style.set_corner_radius_all(12) 
+	style.anti_aliasing = true
+
+	if shape.has(offset + Vector2(1, 0)):
+		style.border_width_right = 0; style.corner_radius_top_right = 0; style.corner_radius_bottom_right = 0
+	if shape.has(offset + Vector2(0, 1)):
+		style.border_width_bottom = 0; style.corner_radius_bottom_right = 0; style.corner_radius_bottom_left = 0
+	if shape.has(offset + Vector2(-1, 0)):
+		style.border_width_left = 0; style.corner_radius_top_left = 0; style.corner_radius_bottom_left = 0
+	if shape.has(offset + Vector2(0, -1)):
+		style.border_width_top = 0; style.corner_radius_top_left = 0; style.corner_radius_top_right = 0
+	return style
+
+func _draw_merged_item(_item_id: int, start_cell: Control, shape: Array, is_focused: bool):
+	var h_sep = grid.get_theme_constant("h_separation")
+	var v_sep = grid.get_theme_constant("v_separation")
+	var spacing = Vector2(max(0, h_sep), max(0, v_sep))
+
+	for offset in shape:
+		var target_coords = _get_cell_coords(start_cell) + Vector2i(offset.x, offset.y)
+		var target_cell = _get_cell_by_coords(target_coords)
+		if not target_cell: continue
+
+		var rect = Rect2(target_cell.position, target_cell.size)
+		var expand = 3.0 
+		if shape.has(offset + Vector2(1, 0)): rect.size.x += spacing.x + expand
+		if shape.has(offset + Vector2(0, 1)): rect.size.y += spacing.y + expand
+		if shape.has(offset + Vector2(-1, 0)): rect.position.x -= expand; rect.size.x += expand
+		if shape.has(offset + Vector2(0, -1)): rect.position.y -= expand; rect.size.y += expand
+
+		var style = _get_merged_stylebox(shape, offset, is_focused, false)
+		style.draw(grid.get_canvas_item(), rect)
+
+func _on_grid_draw():
+	var processed_roots = []
+	for cell in grid.get_children():
+		if not cell.has_node("ItemIcon"): continue
+		var item_id = cell.get_meta("occupied_by_id", -1)
+		if item_id != -1:
+			var root_cell = cell.get_meta("root_cell")
+			if not processed_roots.has(root_cell):
+				if is_dragging_internal and root_cell == active_cell: continue
+				processed_roots.append(root_cell)
+				var shape = root_cell.get_meta("current_shape")
+				var is_focused = (root_cell == active_cell and ItemManager.is_edit_mode)
+				_draw_merged_item(item_id, root_cell, shape, is_focused)
+
+func _update_grid_visuals():
+	for cell in grid.get_children():
+		if not cell.has_node("ItemIcon"): continue
+		var border = cell.get_node_or_null("CellBorder")
+		if not border: continue
+
+		var is_occupied = cell.get_meta("occupied_by_id", -1) != -1
+		if is_occupied and is_dragging_internal and cell.get_meta("root_cell") == active_cell:
+			is_occupied = false
+
+		if is_occupied: border.hide() 
+		else: border.show(); border.set_state(1 if ItemManager.is_edit_mode else 0)
+	grid.queue_redraw()
+
+# ==========================================================
+# --- ПРЕВЬЮ ПАЗЗЛА ---
+# ==========================================================
+func _setup_drag_preview():
+	drag_preview_container = Control.new()
+	drag_preview_container.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	drag_preview_container.z_index = 50
+	add_child(drag_preview_container)
+	drag_preview_container.hide()
+
+func build_drag_preview(item_id: int, shape: Array, rot_deg: int = 0):
+	for c in drag_preview_container.get_children(): c.queue_free()
+	var sample_cell = null
+	for c in grid.get_children():
+		if c.has_node("ItemIcon"): sample_cell = c; break
+	if not sample_cell: return
+
+	var c_size = sample_cell.size
+	var h_sep = grid.get_theme_constant("h_separation")
+	var v_sep = grid.get_theme_constant("v_separation")
+	var spacing = Vector2(max(0, h_sep), max(0, v_sep))
+	
+	for offset in shape:
+		var panel = Panel.new()
+		var style = _get_merged_stylebox(shape, offset, false, true) 
+		panel.add_theme_stylebox_override("panel", style)
+		var p_pos = Vector2(offset.x * (c_size.x + spacing.x), offset.y * (c_size.y + spacing.y))
+		var p_size = c_size
+		var expand = 3.0
+		if shape.has(offset + Vector2(1, 0)): p_size.x += spacing.x + expand
+		if shape.has(offset + Vector2(0, 1)): p_size.y += spacing.y + expand
+		if shape.has(offset + Vector2(-1, 0)): p_pos.x -= expand; p_size.x += expand
+		if shape.has(offset + Vector2(0, -1)): p_pos.y -= expand; p_size.y += expand
+
+		panel.position = p_pos; panel.size = p_size
+		drag_preview_container.add_child(panel)
+
+	var icon = TextureRect.new()
+	icon.texture = load(ItemManager.items_db[item_id]["texture"])
+	icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	drag_preview_container.add_child(icon)
+	_align_icon_in_bbox(icon, item_id, shape, rot_deg)
+
+func show_external_drag_preview(item_id: int, mouse_pos: Vector2):
+	var shape = ItemManager.items_db[item_id]["shape"]
+	build_drag_preview(item_id, shape, 0)
+	update_external_drag_preview(mouse_pos)
+	drag_preview_container.global_position = target_preview_pos
+	drag_preview_container.show()
+
+func update_external_drag_preview(mouse_pos: Vector2):
+	var cell = _get_cell_at_pos(mouse_pos)
+	if cell:
+		target_preview_pos = cell.global_position
+	else:
+		var half := Vector2.ZERO
+		for c in grid.get_children():
+			if c.has_node("ItemIcon"): half = c.size / 2.0; break
+		target_preview_pos = mouse_pos - half + Vector2(0, DRAG_OFFSET_Y)
+
+func hide_external_drag_preview():
+	# Не гасим контейнер, пока предмет «завис» над рюкзаком — иначе main_scene
+	# после try_add_item вызывает _reset_drag_instant() и мгновенно скрывает UI.
+	if is_floating:
+		return
+	drag_preview_container.hide()
+
+# ==========================================================
+# --- ОСТАЛЬНАЯ ЛОГИКА ---
+# ==========================================================
+func _input(event):
+	var mouse_pos = get_global_mouse_position()
+	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
+		if event.pressed:
+			# Пока предмет «завис» — блокируем все клики по ячейкам, кроме кнопок EditMenu
+			if is_floating:
+				if edit_menu and edit_menu.visible and edit_menu.get_global_rect().has_point(mouse_pos):
+					return
+				get_viewport().set_input_as_handled()
+				return
+
+			var clicked_cell = _get_cell_at_pos(mouse_pos)
+			if clicked_cell:
+				var occupant_id = clicked_cell.get_meta("occupied_by_id", -1)
+				if occupant_id != -1:
+					var target_root = clicked_cell.get_meta("root_cell")
+					var target_shape = target_root.get_meta("current_shape")
+					var target_rot = target_root.get_meta("rot_deg", 0)
+					if target_root == active_cell and ItemManager.is_edit_mode:
+						is_dragging_internal = true
+						_hide_icons_for_shape(active_cell, active_shape)
+						build_drag_preview(active_item_id, active_shape, target_rot)
+						update_external_drag_preview(mouse_pos)
+						drag_preview_container.global_position = target_preview_pos
+						drag_preview_container.show()
+						_update_grid_visuals()
+						get_viewport().set_input_as_handled()
+					else:
+						var saved_drag_node = target_root.get_meta("source_drag_node") if target_root.has_meta("source_drag_node") else null
+						_start_edit_mode(target_root, occupant_id, saved_drag_node, target_shape)
+						get_viewport().set_input_as_handled()
+			else:
+				if ItemManager.is_edit_mode and edit_menu and not edit_menu.get_global_rect().has_point(mouse_pos):
+					_close_edit_mode()
+		else:
+			if is_dragging_internal:
+				is_dragging_internal = false
+				hide_external_drag_preview()
+				var target_root = _get_cell_at_pos(mouse_pos)
+				var old_rot = active_cell.get_meta("rot_deg", 0)
+				var success = false
+
+				if target_root and _can_place_shape(target_root, active_shape, true):
+					_clear_item_from_grid(active_cell, active_shape)
+					active_cell = target_root
+					_place_item_in_grid(active_cell, active_item_id, active_shape, old_rot)
+					success = true
+				elif target_root:
+					success = _try_swap_on_drop(target_root, old_rot)
+
+				if success:
+					_show_icons_for_shape(active_cell, active_shape)
+				else:
+					_show_icons_for_shape(active_cell, active_shape)
+				_update_grid_visuals()
+				get_viewport().set_input_as_handled()
+	if event is InputEventMouseMotion and is_dragging_internal:
+		update_external_drag_preview(mouse_pos)
+		get_viewport().set_input_as_handled()
+
+func try_add_item(item_id: int, mouse_pos: Vector2, drag_node: Node3D = null) -> bool:
+	var item_data = ItemManager.items_db.get(item_id)
+	if not item_data: return false
+	var shape = item_data["shape"]
+	var target_root = _get_cell_at_pos(mouse_pos)
+	if not target_root: target_root = _find_first_free_slot(shape)
+	if target_root and _can_place_shape(target_root, shape):
+		_place_item_in_grid(target_root, item_id, shape, 0)
+		if drag_node: target_root.set_meta("source_drag_node", drag_node)
+		_close_edit_mode()
+		ItemManager.mark_item_as_found(item_id)
+		return true
+
+	# Swap: если под пальцем один чужой предмет — вытесняем его
+	if target_root:
+		var obstacles = _get_obstacle_roots(target_root, shape)
+		if obstacles.size() == 1:
+			var obs_root = obstacles[0]
+			var obs_id = -1
+			for c_cell in grid.get_children():
+				if c_cell.has_meta("root_cell") and c_cell.get_meta("root_cell") == obs_root:
+					obs_id = c_cell.get_meta("occupied_by_id", -1); break
+			if obs_id != -1:
+				var obs_shape = obs_root.get_meta("current_shape")
+				var obs_rot = obs_root.get_meta("rot_deg", 0)
+				var obs_drag = obs_root.get_meta("source_drag_node") if obs_root.has_meta("source_drag_node") else null
+				var obs_pos = obs_root.global_position + (obs_root.size / 2.0)
+				_clear_item_from_grid(obs_root, obs_shape)
+				if _can_place_shape(target_root, shape):
+					var free_slot = _find_first_free_slot(obs_shape)
+					if free_slot:
+						_place_item_in_grid(target_root, item_id, shape, 0)
+						if drag_node: target_root.set_meta("source_drag_node", drag_node)
+						_place_item_in_grid(free_slot, obs_id, obs_shape, obs_rot)
+						if obs_drag: free_slot.set_meta("source_drag_node", obs_drag)
+						_animate_swap_fly(free_slot, obs_pos)
+						_close_edit_mode()
+						ItemManager.mark_item_as_found(item_id)
+						return true
+					else:
+						# Нет места для вытесненного — возвращаем его, новый зависает
+						_place_item_in_grid(obs_root, obs_id, obs_shape, obs_rot)
+						if obs_drag: obs_root.set_meta("source_drag_node", obs_drag)
+				else:
+					_place_item_in_grid(obs_root, obs_id, obs_shape, obs_rot)
+					if obs_drag: obs_root.set_meta("source_drag_node", obs_drag)
+
+	# Не удалось разместить/свопнуть → предмет зависает над рюкзаком
+	_enter_floating_state(item_id, drag_node, shape)
+	return true
+
+func _can_place_shape(root_cell: Control, shape: Array, ignore_active: bool = false) -> bool:
+	var root_coords = _get_cell_coords(root_cell)
+	for offset in shape:
+		var target_coords = root_coords + Vector2i(offset.x, offset.y)
+		var cell = _get_cell_by_coords(target_coords)
+		if cell == null: return false 
+		var occupant_id = cell.get_meta("occupied_by_id", -1)
+		if occupant_id != -1 and not (ignore_active and cell.get_meta("root_cell") == active_cell): 
+			return false
+	return true
+
+func _place_item_in_grid(root_cell: Control, item_id: int, shape: Array, rot_deg: int):
+	var tex_path = ItemManager.items_db[item_id]["texture"]
+	var icon = root_cell.get_node("ItemIcon")
+	icon.texture = load(tex_path)
+	icon.show()
+	_align_icon_in_bbox(icon, item_id, shape, rot_deg)
+	root_cell.set_meta("current_shape", shape)
+	root_cell.set_meta("rot_deg", rot_deg)
+	var root_coords = _get_cell_coords(root_cell)
+	for offset in shape:
+		var cell = _get_cell_by_coords(root_coords + Vector2i(offset.x, offset.y))
+		if cell: cell.set_meta("occupied_by_id", item_id); cell.set_meta("root_cell", root_cell)
+	_update_grid_visuals()
+
+func _clear_item_from_grid(root_cell: Control, shape: Array):
+	var root_coords = _get_cell_coords(root_cell)
+	for offset in shape:
+		var cell = _get_cell_by_coords(root_coords + Vector2i(offset.x, offset.y))
+		if cell: cell.remove_meta("occupied_by_id"); cell.remove_meta("root_cell")
+	root_cell.remove_meta("current_shape")
+	root_cell.remove_meta("rot_deg")
+	if root_cell.has_meta("source_drag_node"): root_cell.remove_meta("source_drag_node")
+	root_cell.get_node("ItemIcon").texture = null
+	root_cell.get_node("ItemIcon").hide()
+	_update_grid_visuals()
+
+# ==========================================================
+# --- SWAP ON DROP ---
+# ==========================================================
+func _try_swap_on_drop(target_root: Control, rot_deg: int) -> bool:
+	var obstacles = _get_obstacle_roots(target_root, active_shape)
+	if obstacles.size() != 1:
+		return false
+
+	var obs_root = obstacles[0]
+	var obs_id = obs_root.get_meta("occupied_by_id", -1) if obs_root.has_meta("occupied_by_id") else -1
+	if obs_id == -1:
+		# Fallback: take id from the root cell's first child meta
+		for c_cell in grid.get_children():
+			if c_cell.has_meta("root_cell") and c_cell.get_meta("root_cell") == obs_root:
+				obs_id = c_cell.get_meta("occupied_by_id", -1)
+				break
+	if obs_id == -1: return false
+
+	var obs_shape = obs_root.get_meta("current_shape")
+	var obs_rot = obs_root.get_meta("rot_deg", 0)
+	var obs_drag_node = obs_root.get_meta("source_drag_node") if obs_root.has_meta("source_drag_node") else null
+	var obs_old_pos = obs_root.global_position + (obs_root.size / 2.0)
+
+	_clear_item_from_grid(obs_root, obs_shape)
+
+	if not _can_place_shape(target_root, active_shape, true):
+		_place_item_in_grid(obs_root, obs_id, obs_shape, obs_rot)
+		if obs_drag_node: obs_root.set_meta("source_drag_node", obs_drag_node)
+		return false
+
+	var free_slot = _find_first_free_slot(obs_shape)
+	if free_slot:
+		_clear_item_from_grid(active_cell, active_shape)
+		active_cell = target_root
+		_place_item_in_grid(active_cell, active_item_id, active_shape, rot_deg)
+		_place_item_in_grid(free_slot, obs_id, obs_shape, obs_rot)
+		if obs_drag_node: free_slot.set_meta("source_drag_node", obs_drag_node)
+		_animate_swap_fly(free_slot, obs_old_pos)
+		return true
+	else:
+		# Нет места для вытесненного → возвращаем его, swap отменён
+		_place_item_in_grid(obs_root, obs_id, obs_shape, obs_rot)
+		if obs_drag_node: obs_root.set_meta("source_drag_node", obs_drag_node)
+		return false
+
+func _get_obstacle_roots(root_cell: Control, shape: Array) -> Array:
+	var roots: Array = []
+	var root_coords = _get_cell_coords(root_cell)
+	for offset in shape:
+		var cell = _get_cell_by_coords(root_coords + Vector2i(offset.x, offset.y))
+		if cell == null: continue
+		var occ = cell.get_meta("occupied_by_id", -1)
+		if occ != -1:
+			var r = cell.get_meta("root_cell")
+			if r != active_cell and not roots.has(r):
+				roots.append(r)
+	return roots
+
+func _animate_swap_fly(new_root: Control, old_global_pos: Vector2) -> void:
+	var icon = new_root.get_node_or_null("ItemIcon")
+	if not icon or not icon.visible: return
+	var final_pos = icon.position
+	var offset = old_global_pos - new_root.global_position - (new_root.size / 2.0)
+	icon.position = offset
+	var tw = create_tween().set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+	tw.tween_property(icon, "position", final_pos, 0.25)
+
+# ==========================================================
+# --- FLOATING ITEM (предмет висит над рюкзаком) ---
+# ==========================================================
+func _enter_floating_state(item_id: int, drag_node: Node3D, shape: Array) -> void:
+	# Если уже висит другой — сбрасываем его в шкаф
+	if is_floating:
+		_cancel_floating_item()
+
+	is_floating = true
+	floating_item_id = item_id
+	floating_drag_node = drag_node
+	floating_shape = shape
+
+	build_drag_preview(item_id, shape, 0)
+	# Рисуем поверх фона рюкзака и не наследуем смещения якорей EditMenu
+	drag_preview_container.top_level = true
+	drag_preview_container.z_index = 100
+	var pw := _get_preview_width(floating_shape)
+	var ph := _get_preview_height(floating_shape)
+	drag_preview_container.custom_minimum_size = Vector2(pw, ph)
+	_position_floating_preview()
+	drag_preview_container.global_position = target_preview_pos
+	drag_preview_container.show()
+
+	# EditMenu над превью
+	active_item_id = item_id
+	active_drag_node = drag_node
+	active_shape = shape
+	active_cell = null
+	ItemManager.is_edit_mode = true
+	if edit_menu:
+		edit_menu.top_level = true
+		edit_menu.z_index = 101
+		edit_menu.modulate.a = 1.0; edit_menu.show()
+		edit_menu.scale = Vector2(0.5, 0.5)
+		edit_menu.pivot_offset = edit_menu.size / 2.0
+		create_tween().set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)\
+			.tween_property(edit_menu, "scale", Vector2.ONE, 0.2)
+	# После лейаута кадра — иначе size у EditMenu может быть (0,0)
+	get_tree().create_timer(0.0).timeout.connect(_refresh_floating_ui_layout)
+
+func _cancel_floating_item() -> void:
+	if not is_floating: return
+	var fid = floating_item_id
+	var fdn = floating_drag_node
+	var fly_pos = drag_preview_container.global_position + Vector2(
+		_get_preview_width(floating_shape) / 2.0,
+		_get_preview_height(floating_shape) / 2.0)
+	_clear_floating_state()
+	if get_tree().current_scene.has_method("fly_back_to_cabinet"):
+		get_tree().current_scene.fly_back_to_cabinet(fid, fly_pos, fdn)
+
+func _clear_floating_state() -> void:
+	is_floating = false
+	floating_item_id = -1
+	floating_drag_node = null
+	floating_shape = []
+	if drag_preview_container:
+		drag_preview_container.top_level = false
+		drag_preview_container.z_index = 50
+		drag_preview_container.custom_minimum_size = Vector2.ZERO
+	if edit_menu:
+		edit_menu.top_level = false
+		edit_menu.z_index = 0
+	hide_external_drag_preview()
+
+func _position_floating_preview() -> void:
+	var grid_rect = grid.get_global_rect()
+	var pw = _get_preview_width(floating_shape)
+	var ph = _get_preview_height(floating_shape)
+	var px = grid_rect.position.x + grid_rect.size.x / 2.0 - pw / 2.0
+	var py = grid_rect.position.y + FLOATING_OFFSET_Y - ph
+	target_preview_pos = Vector2(px, py)
+
+func _position_edit_menu_above_preview() -> void:
+	if not edit_menu or not is_floating: return
+	var em_w: float = maxf(edit_menu.size.x, edit_menu.get_combined_minimum_size().x)
+	var em_h: float = maxf(edit_menu.size.y, edit_menu.get_combined_minimum_size().y)
+	if em_w < 1.0 or em_h < 1.0:
+		em_w = 1380.0
+		em_h = 458.0
+	var px = target_preview_pos.x + _get_preview_width(floating_shape) / 2.0 - em_w / 2.0
+	var py = target_preview_pos.y - em_h - 10.0
+	edit_menu.global_position = Vector2(px, py)
+
+func _refresh_floating_ui_layout() -> void:
+	if not is_floating:
+		return
+	_position_floating_preview()
+	if drag_preview_container:
+		drag_preview_container.global_position = target_preview_pos
+		drag_preview_container.show()
+	_position_edit_menu_above_preview()
+
+func _get_preview_width(shape: Array) -> float:
+	if grid.get_child_count() == 0: return 100.0
+	var c = grid.get_child(0).size.x
+	var s = max(0, grid.get_theme_constant("h_separation"))
+	var mx = 0.0
+	for p in shape:
+		if p.x > mx: mx = p.x
+	return (mx + 1) * c + mx * s
+
+func _get_preview_height(shape: Array) -> float:
+	if grid.get_child_count() == 0: return 100.0
+	var c = grid.get_child(0).size.y
+	var s = max(0, grid.get_theme_constant("v_separation"))
+	var my = 0.0
+	for p in shape:
+		if p.y > my: my = p.y
+	return (my + 1) * c + my * s
+
+func _on_btn_rotate():
+	if is_floating:
+		var rotated = []
+		for p in floating_shape: rotated.append(Vector2(-p.y, p.x))
+		var mn_x = 999; var mn_y = 999
+		for p in rotated:
+			if p.x < mn_x: mn_x = p.x
+			if p.y < mn_y: mn_y = p.y
+		for i in range(rotated.size()):
+			rotated[i] = Vector2(rotated[i].x - mn_x, rotated[i].y - mn_y)
+		floating_shape = rotated
+		active_shape = rotated
+		build_drag_preview(floating_item_id, floating_shape, 0)
+		drag_preview_container.custom_minimum_size = Vector2(
+			_get_preview_width(floating_shape), _get_preview_height(floating_shape))
+		_position_floating_preview()
+		_position_edit_menu_above_preview()
+		drag_preview_container.global_position = target_preview_pos
+		drag_preview_container.show()
+		return
+	if not active_cell: return
+	var new_shape = []
+	for p in active_shape: new_shape.append(Vector2(-p.y, p.x))
+	var min_x = 999; var min_y = 999; var max_x = -999; var max_y = -999
+	for p in new_shape:
+		if p.x < min_x: min_x = p.x
+		if p.y < min_y: min_y = p.y
+		if p.x > max_x: max_x = p.x
+		if p.y > max_y: max_y = p.y
+	for i in range(new_shape.size()): new_shape[i] = Vector2(new_shape[i].x - min_x, new_shape[i].y - min_y)
+
+	var new_max_x = max_x - min_x; var new_max_y = max_y - min_y
+	var old_max_x = 0; var old_max_y = 0
+	for p in active_shape:
+		if p.x > old_max_x: old_max_x = p.x
+		if p.y > old_max_y: old_max_y = p.y
+
+	var root_coords = _get_cell_coords(active_cell)
+	var new_root_x = round(root_coords.x + (old_max_x / 2.0) - (new_max_x / 2.0))
+	var new_root_y = round(root_coords.y + (old_max_y / 2.0) - (new_max_y / 2.0))
+	var new_root_coords = Vector2i(new_root_x, new_root_y)
+
+	var valid_root = null
+	var test_offsets = [
+		Vector2i(0,0), Vector2i(1,0), Vector2i(-1,0), Vector2i(0,1), Vector2i(0,-1), 
+		Vector2i(1,1), Vector2i(-1,-1), Vector2i(1,-1), Vector2i(-1,1),
+		Vector2i(2,0), Vector2i(-2,0), Vector2i(0,2), Vector2i(0,-2)
+	]
+	for offset in test_offsets:
+		var test_coords = new_root_coords + offset
+		var test_cell = _get_cell_by_coords(test_coords)
+		if test_cell and _can_place_shape(test_cell, new_shape, true):
+			valid_root = test_cell; break
+
+	if valid_root:
+		var old_rot = active_cell.get_meta("rot_deg", 0)
+		_clear_item_from_grid(active_cell, active_shape)
+		active_shape = new_shape; active_cell = valid_root
+		_place_item_in_grid(active_cell, active_item_id, active_shape, old_rot + 90)
+		
+		var icon = active_cell.get_node("ItemIcon")
+		icon.rotation_degrees = old_rot 
+		var tw = create_tween().set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+		tw.tween_property(icon, "rotation_degrees", old_rot + 90, 0.25)
+		active_cell.set_meta("rot_deg", int(old_rot + 90) % 360)
+		_update_grid_visuals()
+
+func _on_btn_confirm():
+	if active_item_id == -1: return
+
+	if is_floating:
+		var slot = _find_first_free_slot(floating_shape)
+		if slot:
+			_place_item_in_grid(slot, floating_item_id, floating_shape, 0)
+			if floating_drag_node: slot.set_meta("source_drag_node", floating_drag_node)
+			var fid = floating_item_id
+			_clear_floating_state()
+			_close_edit_mode()
+			ItemManager.mark_item_as_found(fid)
+		else:
+			_cancel_floating_item()
+			_close_edit_mode()
+		return
+
+	var confirmed_id = active_item_id
+	_close_edit_mode()
+	ItemManager.mark_item_as_found(confirmed_id)
+
+func _on_btn_cancel():
+	if is_floating:
+		_cancel_floating_item()
+		_close_edit_mode()
+		return
+
+	if not active_cell: _close_edit_mode(); return
+	var fly_pos = active_cell.global_position + (active_cell.size / 2.0)
+	var shape_to_clear = active_shape.duplicate()
+	var cell_to_clear = active_cell
+	var item_to_return = active_item_id
+	var drag_node_to_return = active_drag_node
+	_close_edit_mode(); _clear_item_from_grid(cell_to_clear, shape_to_clear)
+	if get_tree().current_scene.has_method("fly_back_to_cabinet"): get_tree().current_scene.fly_back_to_cabinet(item_to_return, fly_pos, drag_node_to_return)
+
+func _start_edit_mode(cell: Control, item_id: int, drag_node: Node3D, shape: Array = []):
+	var was_edit_mode = ItemManager.is_edit_mode
+	active_cell = cell; active_item_id = item_id; active_drag_node = drag_node
+	active_shape = shape if shape.size() > 0 else ItemManager.items_db[item_id]["shape"]
+	ItemManager.is_edit_mode = true
+	if edit_menu and not was_edit_mode:
+		edit_menu.modulate.a = 1.0; edit_menu.show(); edit_menu.scale = Vector2(0.5, 0.5)
+		edit_menu.pivot_offset = edit_menu.size / 2.0
+		create_tween().set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT).tween_property(edit_menu, "scale", Vector2.ONE, 0.2)
+	_update_grid_visuals()
+
+func _close_edit_mode():
+	if is_floating:
+		_clear_floating_state()
+	ItemManager.is_edit_mode = false; active_cell = null; active_item_id = -1
+	_update_grid_visuals()
+	if edit_menu:
+		var tw = create_tween().set_parallel(true).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN)
+		tw.tween_property(edit_menu, "scale", Vector2(0.5, 0.5), 0.15)
+		tw.tween_property(edit_menu, "modulate:a", 0.0, 0.15)
+		tw.chain().tween_callback(edit_menu.hide)
+
+func _get_cell_coords(cell: Control) -> Vector2i:
+	var idx = cell.get_index(); return Vector2i(idx % grid.columns, idx / grid.columns)
+
+func _get_cell_by_coords(coords: Vector2i) -> Control:
+	if coords.x < 0 or coords.x >= grid.columns: return null
+	var max_y = ceil(float(grid.get_child_count()) / grid.columns)
+	if coords.y < 0 or coords.y >= max_y: return null
+	var idx = coords.y * grid.columns + coords.x
+	if idx < 0 or idx >= grid.get_child_count(): return null
+	var cell = grid.get_child(idx)
+	if not cell.has_node("ItemIcon"): return null 
+	return cell
+
+func _get_cell_at_pos(pos: Vector2) -> Control:
+	for cell in grid.get_children():
+		if cell.has_node("ItemIcon") and cell.get_global_rect().has_point(pos): return cell
+	return null
+
+func _find_first_free_slot(shape: Array) -> Control:
+	for cell in grid.get_children():
+		if cell.has_node("ItemIcon") and _can_place_shape(cell, shape): return cell
+	return null
+
+func _hide_icons_for_shape(root: Control, _shape: Array): root.get_node("ItemIcon").hide()
+func _show_icons_for_shape(root: Control, _shape: Array): root.get_node("ItemIcon").show()
+
+func start_appear_animation():
+	show(); modulate.a = 0.0; var final_y = backpack_bg.position.y
+	backpack_bg.position.y += hide_pos_offset
+	var tw = create_tween().set_parallel(true).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+	tw.tween_property(self, "modulate:a", 1.0, 0.5); tw.tween_property(backpack_bg, "position:y", final_y, 0.7)
+	backpack_bg.pivot_offset = backpack_bg.size / 2.0; backpack_bg.scale = Vector2(0.7, 0.7)
+	tw.tween_property(backpack_bg, "scale", Vector2.ONE, 0.7).set_trans(Tween.TRANS_BACK)

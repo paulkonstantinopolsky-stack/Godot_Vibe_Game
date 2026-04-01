@@ -213,7 +213,7 @@ func _on_autofill_pressed():
 	get_tree().create_timer(total_anim_time).timeout.connect(func(): is_autofill_animating = false)
 
 func _on_item_pressed(id: int, tex: String, node: Node3D):
-	if is_cinematic_playing: return 
+	if is_cinematic_playing: return
 	potential_drag_id = id; potential_drag_tex = tex; potential_drag_node = node
 	drag_start_pos = get_viewport().get_mouse_position()
 
@@ -249,11 +249,18 @@ func _start_drag():
 func _perform_drop():
 	var mouse_pos = get_viewport().get_mouse_position()
 	var dropped_successfully = false
-	if backpack_widget and backpack_widget.get_global_rect().has_point(mouse_pos):
-		if backpack_widget.has_method("try_add_item"):
-			dropped_successfully = backpack_widget.try_add_item(potential_drag_id, mouse_pos, potential_drag_node)
-	if dropped_successfully: current_drag_node = null; _reset_drag_instant() 
-	else: _fly_back_and_cancel() 
+
+	if backpack_widget:
+		var forgiving_drop_zone = backpack_widget.get_global_rect().grow(200.0)
+		if forgiving_drop_zone.has_point(mouse_pos):
+			if backpack_widget.has_method("try_add_item"):
+				dropped_successfully = backpack_widget.try_add_item(potential_drag_id, mouse_pos, potential_drag_node)
+
+	if dropped_successfully:
+		current_drag_node = null
+		_reset_drag_instant()
+	else:
+		_fly_back_and_cancel()
 
 func _fly_back_and_cancel():
 	if autofill_cab_tween and autofill_cab_tween.is_running(): autofill_cab_tween.kill()
