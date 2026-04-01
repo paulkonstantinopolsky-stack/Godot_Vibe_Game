@@ -125,12 +125,39 @@ func auto_fill_and_optimize(required_ids: Array) -> Array:
 		return []
 
 	if successfully_added_new.size() > 0 or existing_items.size() > 0:
-		backpack_bg.pivot_offset = backpack_bg.size / 2.0
-		var tw = create_tween().set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
-		backpack_bg.scale = Vector2(0.95, 0.95)
-		tw.tween_property(backpack_bg, "scale", Vector2.ONE, 0.3)
+		_play_autofill_cascade_animation()
 
 	return successfully_added_new
+
+
+func _play_autofill_cascade_animation() -> void:
+	var target_cells: Array = []
+	for cell in grid.get_children():
+		if cell.has_node("ItemIcon"):
+			target_cells.append(cell)
+
+	backpack_bg.pivot_offset = backpack_bg.size / 2.0
+	backpack_bg.scale = Vector2.ZERO
+
+	for cell in target_cells:
+		cell.pivot_offset = cell.size / 2.0
+		cell.scale = Vector2.ZERO
+		cell.show()
+
+	const DURATION: float = 0.3
+	const DELAY_STEP: float = 0.05
+
+	var bg_tween: Tween = create_tween()
+	bg_tween.tween_property(backpack_bg, "scale", Vector2.ONE, DURATION)\
+		.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+
+	var cell_tween: Tween = create_tween()
+	cell_tween.set_parallel(true)
+	for i in range(target_cells.size()):
+		var c: Control = target_cells[i]
+		cell_tween.tween_property(c, "scale", Vector2.ONE, DURATION)\
+			.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)\
+			.set_delay(float(i) * DELAY_STEP)
 
 func _clear_entire_grid():
 	var roots = []
