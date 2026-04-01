@@ -14,6 +14,9 @@ var active_shape: Array = []
 var is_dragging_internal: bool = false
 var drag_preview_container: Control
 
+const DRAG_OFFSET_Y: float = -80.0
+var target_preview_pos: Vector2 = Vector2.ZERO
+
 func _ready():
 	hide()
 	modulate.a = 0.0
@@ -27,6 +30,11 @@ func _ready():
 	_setup_drag_preview()
 	grid.draw.connect(_on_grid_draw)
 	_update_grid_visuals()
+
+func _process(delta):
+	if drag_preview_container and drag_preview_container.visible:
+		drag_preview_container.global_position = drag_preview_container.global_position.lerp(
+			target_preview_pos, 25.0 * delta)
 
 # ==========================================================
 # --- АЛГОРИТМ АВТО-СБОРКИ (BIN PACKING) ---
@@ -298,11 +306,18 @@ func show_external_drag_preview(item_id: int, mouse_pos: Vector2):
 	var shape = ItemManager.items_db[item_id]["shape"]
 	build_drag_preview(item_id, shape, 0)
 	update_external_drag_preview(mouse_pos)
+	drag_preview_container.global_position = target_preview_pos
 	drag_preview_container.show()
 
 func update_external_drag_preview(mouse_pos: Vector2):
-	for c in grid.get_children():
-		if c.has_node("ItemIcon"): drag_preview_container.global_position = mouse_pos - (c.size / 2.0); break
+	var cell = _get_cell_at_pos(mouse_pos)
+	if cell:
+		target_preview_pos = cell.global_position
+	else:
+		var half := Vector2.ZERO
+		for c in grid.get_children():
+			if c.has_node("ItemIcon"): half = c.size / 2.0; break
+		target_preview_pos = mouse_pos - half + Vector2(0, DRAG_OFFSET_Y)
 
 func hide_external_drag_preview():
 	drag_preview_container.hide()
@@ -326,6 +341,7 @@ func _input(event):
 						_hide_icons_for_shape(active_cell, active_shape)
 						build_drag_preview(active_item_id, active_shape, target_rot)
 						update_external_drag_preview(mouse_pos)
+						drag_preview_container.global_position = target_preview_pos
 						drag_preview_container.show()
 						_update_grid_visuals()
 						get_viewport().set_input_as_handled()
@@ -341,14 +357,21 @@ func _input(event):
 				is_dragging_internal = false
 				hide_external_drag_preview()
 				var target_root = _get_cell_at_pos(mouse_pos)
+				var old_rot = active_cell.get_meta("rot_deg", 0)
 				var success = false
+
 				if target_root and _can_place_shape(target_root, active_shape, true):
-					var old_rot = active_cell.get_meta("rot_deg", 0)
 					_clear_item_from_grid(active_cell, active_shape)
 					active_cell = target_root
 					_place_item_in_grid(active_cell, active_item_id, active_shape, old_rot)
 					success = true
-				if not success: _show_icons_for_shape(active_cell, active_shape)
+				elif target_root:
+					success = _try_swap_on_drop(target_root, old_rot)
+
+				if success:
+					_show_icons_for_shape(active_cell, active_shape)
+				else:
+					_show_icons_for_shape(active_cell, active_shape)
 				_update_grid_visuals()
 				get_viewport().set_input_as_handled()
 	if event is InputEventMouseMotion and is_dragging_internal:
@@ -363,10 +386,43 @@ func try_add_item(item_id: int, mouse_pos: Vector2, drag_node: Node3D = null) ->
 	if not target_root: target_root = _find_first_free_slot(shape)
 	if target_root and _can_place_shape(target_root, shape):
 		_place_item_in_grid(target_root, item_id, shape, 0)
-		if drag_node:
-			target_root.set_meta("source_drag_node", drag_node)
-		_start_edit_mode(target_root, item_id, drag_node, shape)
+		if drag_node: target_root.set_meta("source_drag_node", drag_node)
+		_close_edit_mode()
+		ItemManager.mark_item_as_found(item_id)
 		return true
+
+	# Swap: если под пальцем один чужой предмет — вытесняем его
+	if target_root:
+		var obstacles = _get_obstacle_roots(target_root, shape)
+		if obstacles.size() == 1:
+			var obs_root = obstacles[0]
+			var obs_id = -1
+			for c_cell in grid.get_children():
+				if c_cell.has_meta("root_cell") and c_cell.get_meta("root_cell") == obs_root:
+					obs_id = c_cell.get_meta("occupied_by_id", -1); break
+			if obs_id != -1:
+				var obs_shape = obs_root.get_meta("current_shape")
+				var obs_rot = obs_root.get_meta("rot_deg", 0)
+				var obs_drag = obs_root.get_meta("source_drag_node") if obs_root.has_meta("source_drag_node") else null
+				var obs_pos = obs_root.global_position + (obs_root.size / 2.0)
+				_clear_item_from_grid(obs_root, obs_shape)
+				if _can_place_shape(target_root, shape):
+					_place_item_in_grid(target_root, item_id, shape, 0)
+					if drag_node: target_root.set_meta("source_drag_node", drag_node)
+					var free_slot = _find_first_free_slot(obs_shape)
+					if free_slot:
+						_place_item_in_grid(free_slot, obs_id, obs_shape, obs_rot)
+						if obs_drag: free_slot.set_meta("source_drag_node", obs_drag)
+						_animate_swap_fly(free_slot, obs_pos)
+					else:
+						if get_tree().current_scene.has_method("fly_back_to_cabinet"):
+							get_tree().current_scene.fly_back_to_cabinet(obs_id, obs_pos, obs_drag)
+					_close_edit_mode()
+					ItemManager.mark_item_as_found(item_id)
+					return true
+				else:
+					_place_item_in_grid(obs_root, obs_id, obs_shape, obs_rot)
+					if obs_drag: obs_root.set_meta("source_drag_node", obs_drag)
 	return false
 
 func _can_place_shape(root_cell: Control, shape: Array, ignore_active: bool = false) -> bool:
@@ -405,6 +461,72 @@ func _clear_item_from_grid(root_cell: Control, shape: Array):
 	root_cell.get_node("ItemIcon").texture = null
 	root_cell.get_node("ItemIcon").hide()
 	_update_grid_visuals()
+
+# ==========================================================
+# --- SWAP ON DROP ---
+# ==========================================================
+func _try_swap_on_drop(target_root: Control, rot_deg: int) -> bool:
+	var obstacles = _get_obstacle_roots(target_root, active_shape)
+	if obstacles.size() != 1:
+		return false
+
+	var obs_root = obstacles[0]
+	var obs_id = obs_root.get_meta("occupied_by_id", -1) if obs_root.has_meta("occupied_by_id") else -1
+	if obs_id == -1:
+		# Fallback: take id from the root cell's first child meta
+		for c_cell in grid.get_children():
+			if c_cell.has_meta("root_cell") and c_cell.get_meta("root_cell") == obs_root:
+				obs_id = c_cell.get_meta("occupied_by_id", -1)
+				break
+	if obs_id == -1: return false
+
+	var obs_shape = obs_root.get_meta("current_shape")
+	var obs_rot = obs_root.get_meta("rot_deg", 0)
+	var obs_drag_node = obs_root.get_meta("source_drag_node") if obs_root.has_meta("source_drag_node") else null
+	var obs_old_pos = obs_root.global_position + (obs_root.size / 2.0)
+
+	_clear_item_from_grid(obs_root, obs_shape)
+
+	if not _can_place_shape(target_root, active_shape, true):
+		_place_item_in_grid(obs_root, obs_id, obs_shape, obs_rot)
+		if obs_drag_node: obs_root.set_meta("source_drag_node", obs_drag_node)
+		return false
+
+	_clear_item_from_grid(active_cell, active_shape)
+	active_cell = target_root
+	_place_item_in_grid(active_cell, active_item_id, active_shape, rot_deg)
+
+	var free_slot = _find_first_free_slot(obs_shape)
+	if free_slot:
+		_place_item_in_grid(free_slot, obs_id, obs_shape, obs_rot)
+		if obs_drag_node: free_slot.set_meta("source_drag_node", obs_drag_node)
+		_animate_swap_fly(free_slot, obs_old_pos)
+	else:
+		if get_tree().current_scene.has_method("fly_back_to_cabinet"):
+			get_tree().current_scene.fly_back_to_cabinet(obs_id, obs_old_pos, obs_drag_node)
+	return true
+
+func _get_obstacle_roots(root_cell: Control, shape: Array) -> Array:
+	var roots: Array = []
+	var root_coords = _get_cell_coords(root_cell)
+	for offset in shape:
+		var cell = _get_cell_by_coords(root_coords + Vector2i(offset.x, offset.y))
+		if cell == null: continue
+		var occ = cell.get_meta("occupied_by_id", -1)
+		if occ != -1:
+			var r = cell.get_meta("root_cell")
+			if r != active_cell and not roots.has(r):
+				roots.append(r)
+	return roots
+
+func _animate_swap_fly(new_root: Control, old_global_pos: Vector2) -> void:
+	var icon = new_root.get_node_or_null("ItemIcon")
+	if not icon or not icon.visible: return
+	var final_pos = icon.position
+	var offset = old_global_pos - new_root.global_position - (new_root.size / 2.0)
+	icon.position = offset
+	var tw = create_tween().set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+	tw.tween_property(icon, "position", final_pos, 0.25)
 
 func _on_btn_rotate():
 	if not active_cell: return

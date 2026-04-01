@@ -39,14 +39,20 @@ const CAP_TOP_Y_MARGIN: float = 0.0
 @export var haptics_enabled: bool = true
 @export var haptic_click_ms: int = 10
 
+const DRAG_DEADZONE: float = 15.0
+const FLICK_THRESHOLD: float = 600.0   # пикс/сек — быстрее → шкаф перелетает к следующей грани
+const FLICK_MAX_FACES: int = 3         # макс. граней за один флик
+
 var can_rotate: bool = false
 var is_dragging: bool = false
-var is_swipe_confirmed: bool = false 
+var is_swipe_confirmed: bool = false
 var drag_start_pos_v: Vector2 = Vector2.ZERO
 var angular_velocity: float = 0.0
 var last_frame_x: float = 0.0
 var snap_tween: Tween
 var last_haptic_index: int = 0
+var _accumulated_drag: float = 0.0
+var _recent_velocities: Array = []
 
 var red_cell_scene = preload("res://Scenes/Cell_Red.tscn")
 var green_cell_scene = preload("res://Scenes/Cell_Green.tscn")
@@ -75,61 +81,75 @@ func set_bonus_fixed_post_open_delay(seconds: float) -> void:
 func _ready() -> void:
 	hide()
 
-func _process(delta: float) -> void:
+func _process(_delta: float) -> void:
 	if not can_rotate: return
-	if not is_dragging:
-		if abs(angular_velocity) > 0.001:
-			rotate_y(angular_velocity * delta)
-			angular_velocity *= friction
-			_check_haptic_click()
-			if abs(angular_velocity) < snap_velocity_limit:
-				if snap_tween == null or not snap_tween.is_running():
-					_start_snap()
+	if snap_tween and snap_tween.is_running():
+		_check_haptic_click()
 
 func _input(event: InputEvent) -> void:
 	if not can_rotate: return
-	
+
+	# === RELEASE (mouse + touch) ===
+	var is_release := false
 	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and not event.pressed:
+		is_release = true
+	if event is InputEventScreenTouch and not event.pressed:
+		is_release = true
+	if is_release:
 		is_dragging = false
 		if is_swipe_confirmed:
-			var total_drag = event.position.x - drag_start_pos_v.x
-			angular_velocity += (total_drag * throw_momentum_factor) * 0.01
+			_snap_with_inertia()
 		is_swipe_confirmed = false
 		return
-		
+
+	# Если идёт перетаскивание предмета из шкафа в рюкзак — не вращаем
 	if ItemManager.is_dragging_item:
 		is_dragging = false
 		is_swipe_confirmed = false
-		return 
-	
-	if (event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT) or event is InputEventScreenTouch:
+		return
+
+	# === PRESS ===
+	if (event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT) \
+		or event is InputEventScreenTouch:
 		if event.pressed:
-			is_dragging = false 
+			is_dragging = false
 			is_swipe_confirmed = false
 			drag_start_pos_v = event.position
 			last_frame_x = event.position.x
+			_accumulated_drag = 0.0
+			_recent_velocities.clear()
 			angular_velocity = 0.0
 			_stop_snap()
-				
-	if (event is InputEventMouseMotion or event is InputEventScreenDrag):
-		if Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT):
-			is_dragging = true
-			if not is_swipe_confirmed:
+
+	# === DRAG / MOTION ===
+	if event is InputEventMouseMotion or event is InputEventScreenDrag:
+		if not Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT):
+			return
+		is_dragging = true
+
+		if not is_swipe_confirmed:
+			_accumulated_drag += abs(event.relative.x) + abs(event.relative.y)
+			if _accumulated_drag >= DRAG_DEADZONE:
 				var diff = event.position - drag_start_pos_v
-				if diff.length() > 15.0: 
-					if abs(diff.x) > abs(diff.y):
-						is_swipe_confirmed = true 
-						last_frame_x = event.position.x 
-					else:
-						is_dragging = false 
-						return
-						
-			if is_swipe_confirmed:
-				var delta_x = event.position.x - last_frame_x
-				rotate_y(deg_to_rad(delta_x * sensitivity))
-				angular_velocity = deg_to_rad(delta_x / (1.0/60.0)) * 2.0
-				last_frame_x = event.position.x
-				_check_haptic_click()
+				if abs(diff.x) > abs(diff.y):
+					is_swipe_confirmed = true
+					last_frame_x = event.position.x
+				else:
+					is_dragging = false
+					return
+
+		if is_swipe_confirmed:
+			var delta_x = event.position.x - last_frame_x
+			rotate_y(deg_to_rad(delta_x * sensitivity))
+			last_frame_x = event.position.x
+
+			var dt := get_process_delta_time()
+			if dt > 0.0:
+				_recent_velocities.append(delta_x / dt)
+				if _recent_velocities.size() > 5:
+					_recent_velocities.remove_at(0)
+
+			_check_haptic_click()
 
 func _check_haptic_click() -> void:
 	if not haptics_enabled: return
@@ -149,6 +169,33 @@ func _start_snap() -> void:
 
 func _stop_snap() -> void:
 	if snap_tween: snap_tween.kill()
+
+func _snap_with_inertia() -> void:
+	var avg_vel: float = 0.0
+	if _recent_velocities.size() > 0:
+		for v in _recent_velocities:
+			avg_vel += v
+		avg_vel /= _recent_velocities.size()
+	_recent_velocities.clear()
+
+	# Сколько граней пропустить по инерции
+	var face_offset: int = 0
+	if abs(avg_vel) > FLICK_THRESHOLD:
+		face_offset = clampi(int(avg_vel / FLICK_THRESHOLD), -FLICK_MAX_FACES, FLICK_MAX_FACES)
+
+	var nearest: float = round(rotation.y / STEP_ANGLE) * STEP_ANGLE
+	var target: float = nearest + float(face_offset) * STEP_ANGLE
+
+	# Длительность зависит от расстояния, но с ограничениями
+	var angle_dist: float = abs(target - rotation.y)
+	var duration := clampf(angle_dist / deg_to_rad(90.0) * 0.3, 0.15, 0.5)
+
+	angular_velocity = 0.0
+	_stop_snap()
+	snap_tween = create_tween()
+	snap_tween.tween_property(self, "rotation:y", target, duration)\
+		.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+	snap_tween.finished.connect(func(): _check_haptic_click())
 
 func _get_camera_angle_xz(default_angle: float = PI / 2.0) -> float:
 	var cam = get_viewport().get_camera_3d()
