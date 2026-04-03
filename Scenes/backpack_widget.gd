@@ -9,11 +9,19 @@ var palette: GamePaletteResource
 
 @export_group("Backpack Magnetism")
 @export var magnet_enabled: bool = true
-@export var magnet_max_offset: float = 60.0 # Сильно увеличено для ПК
-@export var magnet_radius: float = 2500.0 # Покрывает весь экран
+@export var magnet_max_offset: float = 60.0
+@export var magnet_radius: float = 2500.0
+@export var magnet_stabilization_radius: float = 300.0 # Мертвая зона для точного прицеливания
 @export var magnet_smoothness: float = 12.0
 @export var magnet_scale_bump: float = 1.02
-@export var magnet_max_rotation: float = 2.0 # НОВАЯ ФИЧА: наклон рюкзака
+@export var magnet_max_rotation: float = 2.0
+
+@export_group("Grid Magnetism")
+@export var grid_catch_radius: float = 120.0 # Дистанция захвата снаружи
+@export var grid_release_radius: float = 220.0 # Сила удержания (натяжение резинки)
+@export var fast_snap_multiplier: float = 3.5 # Сила рывка при первом попадании в сетку
+
+var _current_snap_speed_mult: float = 1.0
 
 @onready var backpack_bg = $BackpackBG
 @onready var grid = $BackpackBG/CenterContainer/GridContainer 
@@ -35,6 +43,11 @@ var bg_base_pos: Vector2 = Vector2.ZERO
 var bg_base_scale: Vector2 = Vector2.ONE
 var bg_base_rot: float = 0.0
 var is_magnet_ready: bool = false # Блокирует магнит во время анимации появления
+var is_preview_snapped: bool = false
+var _snapped_root_cell: Control = null
+var mag_target_pos: Vector2 = Vector2.ZERO
+var mag_target_scale: Vector2 = Vector2.ONE
+var mag_target_rot: float = 0.0
 ## Форма текущего превью (для магнита и проверки ячейки)
 var _drag_preview_shape: Array = []
 
@@ -61,7 +74,10 @@ func _ready():
 func _process(delta: float) -> void:
 	# 1. Логика превью
 	if drag_preview_container and drag_preview_container.visible:
-		var weight: float = clampf(drag_smooth_speed * delta, 0.0, 1.0)
+		# Плавное затухание ускорения обратно к норме (скорости drag_smooth_speed)
+		_current_snap_speed_mult = lerpf(_current_snap_speed_mult, 1.0, 15.0 * delta)
+
+		var weight: float = clampf(drag_smooth_speed * _current_snap_speed_mult * delta, 0.0, 1.0)
 		drag_preview_container.global_position = drag_preview_container.global_position.lerp(
 			target_preview_pos, weight)
 
@@ -74,27 +90,34 @@ func _process(delta: float) -> void:
 	var target_bg_rot = bg_base_rot
 
 	if ItemManager.is_dragging_item and not is_dragging_internal and drag_preview_container.visible:
-		var mouse_pos = get_global_mouse_position()
-		var bg_global_center = backpack_bg.global_position + (backpack_bg.size / 2.0)
-		var dist = mouse_pos.distance_to(bg_global_center)
+		if is_preview_snapped:
+			# ЗАМОРОЗКА: Рюкзак замирает в том положении, в котором находился в момент примагничивания
+			target_bg_pos = mag_target_pos
+			target_bg_scale = mag_target_scale
+			target_bg_rot = mag_target_rot
+		else:
+			# АКТИВНЫЙ МАГНИТ: вычисляем И применяем к целям
+			var targets = _calculate_current_magnet_targets()
+			target_bg_pos = targets.pos
+			target_bg_scale = targets.scale
+			target_bg_rot = targets.rot
+	else:
+		# СБРОС: Если мы ничего не тащим, сбрасываем замороженные цели на центр
+		mag_target_pos = bg_base_pos
+		mag_target_scale = bg_base_scale
+		mag_target_rot = bg_base_rot
+		is_preview_snapped = false
+		_snapped_root_cell = null
 
-		if dist < magnet_radius:
-			var raw_pull = 1.0 - (dist / magnet_radius)
-			# Корень из raw_pull заставляет магнит реагировать гораздо сильнее даже на дальних дистанциях
-			var pull_strength = pow(raw_pull, 0.5)
-
-			var dir = bg_global_center.direction_to(mouse_pos)
-
-			target_bg_pos = bg_base_pos + (dir * magnet_max_offset * pull_strength)
-			target_bg_scale = bg_base_scale * lerpf(1.0, magnet_scale_bump, pull_strength)
-
-			# Наклон в сторону пальца создает эффект "открытого рта" и параллакса
-			target_bg_rot = bg_base_rot + (dir.x * magnet_max_rotation * pull_strength)
-
+	# Плавно применяем трансформации
 	var m_weight = clampf(magnet_smoothness * delta, 0.0, 1.0)
 	backpack_bg.position = backpack_bg.position.lerp(target_bg_pos, m_weight)
 	backpack_bg.scale = backpack_bg.scale.lerp(target_bg_scale, m_weight)
 	backpack_bg.rotation_degrees = lerpf(backpack_bg.rotation_degrees, target_bg_rot, m_weight)
+
+	# Синхронизация наклона превью
+	if drag_preview_container.visible:
+		drag_preview_container.rotation_degrees = backpack_bg.rotation_degrees
 
 # ==========================================================
 # --- АЛГОРИТМ АВТО-СБОРКИ (BIN PACKING) ---
@@ -465,25 +488,88 @@ func _get_preview_pixel_size(shape: Array) -> Vector2:
 			max_y = p.y
 	return Vector2((max_x + 1.0) * cell_size.x, (max_y + 1.0) * cell_size.y)
 
+func _find_closest_cell_in_radius(hotspot: Vector2, radius: float) -> Control:
+	var closest_cell: Control = null
+	var min_dist: float = INF
+	for cell in grid.get_children():
+		if cell is Control: # Убеждаемся, что это нода ячейки
+			var cell_center = cell.global_position + (cell.size / 2.0)
+			var dist = hotspot.distance_to(cell_center)
+			if dist < min_dist and dist <= radius:
+				min_dist = dist
+				closest_cell = cell
+	return closest_cell
+
+func _calculate_current_magnet_targets() -> Dictionary:
+	var hotspot = get_global_mouse_position() + drag_pointer_offset
+	var current_local_offset = backpack_bg.position - bg_base_pos
+	var base_global_center = (backpack_bg.global_position - current_local_offset) + (backpack_bg.size / 2.0)
+	var dist = hotspot.distance_to(base_global_center)
+
+	var res = {"pos": bg_base_pos, "scale": bg_base_scale, "rot": bg_base_rot}
+
+	if dist < magnet_radius and dist > magnet_stabilization_radius:
+		var pull_range = magnet_radius - magnet_stabilization_radius
+		var dist_in_range = dist - magnet_stabilization_radius
+		var raw_pull = 1.0 - (dist_in_range / pull_range)
+		var pull_strength = pow(raw_pull, 0.5)
+		var dir = base_global_center.direction_to(hotspot)
+
+		res.pos = bg_base_pos + (dir * magnet_max_offset * pull_strength)
+		res.scale = bg_base_scale * lerpf(1.0, magnet_scale_bump, pull_strength)
+		res.rot = bg_base_rot + (dir.x * magnet_max_rotation * pull_strength)
+	return res
+
 func _update_drag_preview_pos(mouse_pos: Vector2) -> void:
 	var hotspot: Vector2 = mouse_pos + drag_pointer_offset
-	var root_cell: Control = _get_cell_at_pos(hotspot)
+	var half_size: Vector2 = _get_preview_pixel_size(_drag_preview_shape) / 2.0
 
+	# ШАГ 1: Ищем новую ячейку (строго по пальцу или радиусу захвата)
+	var current_cell = _get_cell_at_pos(hotspot)
+	if not current_cell and not is_preview_snapped:
+		current_cell = _find_closest_cell_in_radius(hotspot, grid_catch_radius)
+
+	# ШАГ 2: Проверяем валидность новой ячейки
 	var is_valid = false
-
-	if root_cell and not _drag_preview_shape.is_empty():
-		is_valid = _can_place_shape(root_cell, _drag_preview_shape, is_dragging_internal)
+	if current_cell and not _drag_preview_shape.is_empty():
+		is_valid = _can_place_shape(current_cell, _drag_preview_shape, is_dragging_internal)
 		if not is_valid:
-			var obstacles = _get_obstacle_roots(root_cell, _drag_preview_shape)
-			if obstacles.size() > 0:
-				var multi_swap = _calculate_multi_swap(root_cell, _drag_preview_shape, obstacles)
-				if multi_swap.size() > 0:
-					is_valid = true
+			var obstacles = _get_obstacle_roots(current_cell, _drag_preview_shape)
+			if obstacles.size() > 0 and _calculate_multi_swap(current_cell, _drag_preview_shape, obstacles).size() > 0:
+				is_valid = true
 
+	# ШАГ 3: ГИСТЕРЕЗИС (Если новая позиция невалидна, но мы были приклеены к старой)
+	if not is_valid and is_preview_snapped and _snapped_root_cell:
+		var last_center = _snapped_root_cell.global_position + (_snapped_root_cell.size / 2.0)
+		if hotspot.distance_to(last_center) <= grid_release_radius:
+			# Резинка еще держит! Принудительно остаемся на старой валидной ячейке
+			current_cell = _snapped_root_cell
+			is_valid = true
+
+	# ШАГ 4: Применяем позицию и состояния
 	if is_valid:
-		target_preview_pos = root_cell.global_position
+		if not is_preview_snapped:
+			# ВХОД В СЕТКУ (Мгновенный снимок магнита)
+			is_preview_snapped = true
+			_current_snap_speed_mult = fast_snap_multiplier
+			var targets = _calculate_current_magnet_targets()
+			mag_target_pos = targets.pos
+			mag_target_scale = targets.scale
+			mag_target_rot = targets.rot
+
+		_snapped_root_cell = current_cell
+		target_preview_pos = current_cell.global_position
 	else:
-		var half_size: Vector2 = _get_preview_pixel_size(_drag_preview_shape) / 2.0
+		# ВЫХОД ИЛИ СВОБОДНЫЙ ПОЛЕТ
+		if is_preview_snapped:
+			# Только что оторвались (порвали резинку) - обновляем магнит
+			var targets = _calculate_current_magnet_targets()
+			mag_target_pos = targets.pos
+			mag_target_scale = targets.scale
+			mag_target_rot = targets.rot
+
+		is_preview_snapped = false
+		_snapped_root_cell = null
 		target_preview_pos = hotspot - half_size
 
 func hide_external_drag_preview():
