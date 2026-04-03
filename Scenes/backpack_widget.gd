@@ -9,11 +9,11 @@ var palette: GamePaletteResource
 
 @export_group("Backpack Magnetism")
 @export var magnet_enabled: bool = true
-@export var magnet_max_offset: float = 60.0
+@export var magnet_max_offset: float = 120.0 # Выдвигаем рюкзак дальше (было 60)
 @export var magnet_radius: float = 2500.0
 @export var magnet_stabilization_radius: float = 300.0 # Мертвая зона для точного прицеливания
 @export var magnet_smoothness: float = 12.0
-@export var magnet_scale_bump: float = 1.02
+@export var magnet_scale_bump: float = 1.08 # Увеличиваем сильнее (было 1.02)
 @export var magnet_max_rotation: float = 2.0
 
 @export_group("Grid Magnetism")
@@ -74,10 +74,14 @@ func _ready():
 func _process(delta: float) -> void:
 	# 1. Логика превью
 	if drag_preview_container and drag_preview_container.visible:
-		# Плавное затухание ускорения обратно к норме (скорости drag_smooth_speed)
 		_current_snap_speed_mult = lerpf(_current_snap_speed_mult, 1.0, 15.0 * delta)
-
 		var weight: float = clampf(drag_smooth_speed * _current_snap_speed_mult * delta, 0.0, 1.0)
+
+		# СИНХРОНИЗАЦИЯ МАСШТАБА: Паззл растет пропорционально рюкзаку
+		if bg_base_scale != Vector2.ZERO:
+			var relative_bg_scale = backpack_bg.scale / bg_base_scale
+			drag_preview_container.scale = drag_preview_container.scale.lerp(relative_bg_scale, weight)
+
 		drag_preview_container.global_position = drag_preview_container.global_position.lerp(
 			target_preview_pos, weight)
 
@@ -522,7 +526,10 @@ func _calculate_current_magnet_targets() -> Dictionary:
 
 func _update_drag_preview_pos(mouse_pos: Vector2) -> void:
 	var hotspot: Vector2 = mouse_pos + drag_pointer_offset
-	var half_size: Vector2 = _get_preview_pixel_size(_drag_preview_shape) / 2.0
+
+	# Учитываем масштаб превью для идеального центрирования:
+	var current_preview_scale = drag_preview_container.scale if drag_preview_container else Vector2.ONE
+	var half_size: Vector2 = (_get_preview_pixel_size(_drag_preview_shape) * current_preview_scale) / 2.0
 
 	# ШАГ 1: Ищем новую ячейку (строго по пальцу или радиусу захвата)
 	var current_cell = _get_cell_at_pos(hotspot)
@@ -572,9 +579,13 @@ func _update_drag_preview_pos(mouse_pos: Vector2) -> void:
 		_snapped_root_cell = null
 		target_preview_pos = hotspot - half_size
 
-func hide_external_drag_preview():
-	drag_preview_container.hide()
+func hide_external_drag_preview() -> void:
+	if drag_preview_container:
+		drag_preview_container.hide()
+		drag_preview_container.scale = Vector2.ONE # Сбрасываем масштаб
 	_update_grid_visuals()
+	is_preview_snapped = false
+	_snapped_root_cell = null
 
 # ==========================================================
 # --- ОСТАЛЬНАЯ ЛОГИКА ---
