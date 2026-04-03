@@ -33,7 +33,7 @@ const CAP_TOP_Y_MARGIN: float = 0.0
 @export var swipe_sensitivity: float = 0.5
 @export var max_angular_velocity: float = 25.0
 @export var friction: float = 3.0
-@export var snap_threshold: float = 3.0
+@export var snap_threshold: float = 2.0
 @export var snap_duration: float = 0.25
 @export var face_angle_step: float = 45.0
 
@@ -148,6 +148,7 @@ func _apply_direct_rotation(rel_x: float) -> void:
 	rotation_degrees.y = current_rotation_y
 	angular_velocity = rel_x * swipe_sensitivity
 	angular_velocity = clampf(angular_velocity, -max_angular_velocity, max_angular_velocity)
+	# Щелчки только через хаптики, без визуального притяжения к грани во время драга
 	_check_haptic_click()
 
 func _begin_snap_to_face(target_y: float) -> void:

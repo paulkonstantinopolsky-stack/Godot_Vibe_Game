@@ -120,12 +120,14 @@ func _play_next_cinematic():
 	else:
 		is_cinematic_playing = false
 
-func _find_cabinet_item_node(parent_node: Node, target_id: int) -> Node3D:
-	if parent_node == null: return null
-	if "id" in parent_node and parent_node.get("id") == target_id: return parent_node as Node3D
-	if "item_id" in parent_node and parent_node.get("item_id") == target_id: return parent_node as Node3D
+func _find_cabinet_item_node(parent_node: Node, target_id: int, ignore_list: Array = []) -> Node3D:
+	if parent_node == null:
+		return null
+	if not parent_node in ignore_list:
+		if "id" in parent_node and parent_node.get("id") == target_id: return parent_node as Node3D
+		if "item_id" in parent_node and parent_node.get("item_id") == target_id: return parent_node as Node3D
 	for child in parent_node.get_children():
-		var found = _find_cabinet_item_node(child, target_id)
+		var found = _find_cabinet_item_node(child, target_id, ignore_list)
 		if found: return found
 	return null
 
@@ -144,9 +146,12 @@ func _on_autofill_pressed():
 	is_autofill_animating = true
 
 	var fly_data_array = []
+	var used_cab_nodes = []
 	for place_data in placements:
 		var id = place_data["id"]
-		var cab_node = _find_cabinet_item_node(cabinet, id)
+		var cab_node = _find_cabinet_item_node(cabinet, id, used_cab_nodes)
+		if cab_node:
+			used_cab_nodes.append(cab_node)
 		fly_data_array.append({
 			"id": id, "cell": place_data["cell"], "cab_node": cab_node,
 			"start_y": cab_node.global_position.y if cab_node else -9999.0
@@ -279,35 +284,27 @@ func _fly_back_and_cancel():
 	var my_gen := fly_back_gen
 	if backpack_widget and backpack_widget.has_method("hide_external_drag_preview"): backpack_widget.hide_external_drag_preview()
 	var node_to_return = current_drag_node
-	if drag_preview:
-		drag_preview.texture = load(potential_drag_tex)
-		drag_preview.custom_minimum_size = Vector2.ZERO
-		drag_preview.size = drag_preview.texture.get_size() if drag_preview.texture else Vector2.ZERO
-		drag_preview.global_position = get_viewport().get_mouse_position() - (drag_preview.size / 2.0)
-		drag_preview.show()
-		# Шаг 1: поворачиваем шкаф к нужной грани (принудительно)
-		const FOCUS_DUR := 0.2
+	if node_to_return and is_instance_valid(node_to_return):
+		var tex_path = potential_drag_tex
+		var fly_icon = TextureRect.new()
+		fly_icon.texture = load(tex_path)
+		fly_icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		fly_icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+		fly_icon.size = fly_icon.texture.get_size() if fly_icon.texture else Vector2(100, 100)
+		fly_icon.pivot_offset = fly_icon.size / 2.0
+		fly_icon.global_position = get_viewport().get_mouse_position() - fly_icon.pivot_offset
+		fly_icon.z_index = 100
+		$UILayer.add_child(fly_icon)
+
+		if drag_preview: drag_preview.hide()
+
+		const FOCUS_DURATION := 0.2
 		if cabinet and cabinet.has_method("focus_item_face_to_camera") and node_to_return and not is_cinematic_playing:
-			cabinet.focus_item_face_to_camera(node_to_return, FOCUS_DUR, true)
-		# Шаг 2: ждём поворота, вычисляем проекцию ПОСЛЕ поворота, летим
+			cabinet.focus_item_face_to_camera(node_to_return, FOCUS_DURATION, true)
+
 		fly_tween = create_tween().set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
-		fly_tween.tween_interval(FOCUS_DUR)
-		fly_tween.tween_callback(func():
-			if my_gen != fly_back_gen: return  # Устарело — новый fly_back уже запущен
-			var cam = get_viewport().get_camera_3d()
-			var target_pos = drag_start_pos - (drag_preview.size / 2.0)
-			if cam and node_to_return and is_instance_valid(node_to_return):
-				target_pos = cam.unproject_position(node_to_return.global_position) - (drag_preview.size / 2.0)
-			inner_fly_tween = create_tween().set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
-			inner_fly_tween.tween_property(drag_preview, "global_position", target_pos, 0.3)
-			inner_fly_tween.tween_callback(func():
-				if my_gen != fly_back_gen: return
-				drag_preview.hide(); drag_preview.texture = null
-				if node_to_return and is_instance_valid(node_to_return):
-					if node_to_return.has_method("show_item"): node_to_return.show_item()
-					else: node_to_return.show()
-			)
-		)
+		fly_tween.tween_interval(FOCUS_DURATION)
+		fly_tween.tween_callback(_on_fly_back_focus_done.bind(my_gen, fly_icon, node_to_return))
 	else:
 		if node_to_return and is_instance_valid(node_to_return):
 			if node_to_return.has_method("show_item"): node_to_return.show_item()
@@ -367,45 +364,56 @@ func start_game_flow():
 		if autofill_button: autofill_button.modulate.a = 1.0; autofill_button.show()
 	)
 
+func _on_fly_back_focus_done(my_gen: int, fly_icon: TextureRect, drag_node: Node3D) -> void:
+	if my_gen == fly_back_gen:
+		_tween_fly_icon_to_node3d(my_gen, fly_icon, drag_node)
+
+func _tween_fly_icon_to_node3d(my_gen: int, fly_icon: TextureRect, drag_node: Node3D) -> void:
+	var cam = get_viewport().get_camera_3d()
+	var target_pos = drag_start_pos - fly_icon.pivot_offset
+	if cam and drag_node and is_instance_valid(drag_node):
+		target_pos = cam.unproject_position(drag_node.global_position) - fly_icon.pivot_offset
+	inner_fly_tween = create_tween().set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+	inner_fly_tween.tween_property(fly_icon, "global_position", target_pos, 0.3)
+	inner_fly_tween.tween_callback(func():
+		if my_gen == fly_back_gen:
+			fly_icon.queue_free()
+			if drag_node and is_instance_valid(drag_node):
+				if drag_node.has_method("show_item"): drag_node.show_item()
+				else: drag_node.show()
+	)
+
 func fly_back_to_cabinet(item_id: int, start_pos: Vector2, drag_node: Node3D):
+	const FOCUS_DURATION := 0.2
 	if item_id == -1: ItemManager.is_dragging_item = false; return
+	ItemManager.unmark_item_as_found(item_id)
 	if autofill_cab_tween and autofill_cab_tween.is_running(): autofill_cab_tween.kill()
 	if inner_fly_tween and inner_fly_tween.is_running(): inner_fly_tween.kill()
 	if fly_tween and fly_tween.is_running(): fly_tween.kill()
 	fly_back_gen += 1
 	var my_gen := fly_back_gen
 	ItemManager.is_dragging_item = false
-	if drag_preview:
-		var tex_path = ItemManager.items_db[item_id]["texture"]
-		drag_preview.texture = load(tex_path); drag_preview.custom_minimum_size = Vector2.ZERO
-		drag_preview.size = drag_preview.texture.get_size() if drag_preview.texture else Vector2.ZERO
-		drag_preview.global_position = start_pos - (drag_preview.size / 2.0); drag_preview.show()
-
-		# Шаг 1: сразу поворачиваем шкаф нужной гранью к камере (принудительно, без порога)
-		const FOCUS_DURATION := 0.2
-		if cabinet and cabinet.has_method("focus_item_face_to_camera") and drag_node and not is_cinematic_playing:
-			cabinet.focus_item_face_to_camera(drag_node, FOCUS_DURATION, true)
-
-		# Шаг 2: ждём поворота, затем летим точно в проекцию 3D-ячейки
-		fly_tween = create_tween().set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
-		fly_tween.tween_interval(FOCUS_DURATION)
-		fly_tween.tween_callback(func():
-			if my_gen != fly_back_gen: return  # Устарело — новый fly_back уже запущен
-			var cam = get_viewport().get_camera_3d()
-			var target_pos = drag_start_pos - (drag_preview.size / 2.0)
-			if cam and drag_node and is_instance_valid(drag_node):
-				target_pos = cam.unproject_position(drag_node.global_position) - (drag_preview.size / 2.0)
-			inner_fly_tween = create_tween().set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
-			inner_fly_tween.tween_property(drag_preview, "global_position", target_pos, 0.3)
-			inner_fly_tween.tween_callback(func():
-				if my_gen != fly_back_gen: return
-				drag_preview.hide(); drag_preview.texture = null
-				if drag_node:
-					if drag_node.has_method("show_item"): drag_node.show_item()
-					else: drag_node.show()
-			)
-		)
-	else:
-		if drag_node:
+	if not ItemManager.items_db.has(item_id):
+		if drag_node and is_instance_valid(drag_node):
 			if drag_node.has_method("show_item"): drag_node.show_item()
 			else: drag_node.show()
+		return
+	var tex_path = ItemManager.items_db[item_id]["texture"]
+	var fly_icon = TextureRect.new()
+	fly_icon.texture = load(tex_path)
+	fly_icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	fly_icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	fly_icon.size = fly_icon.texture.get_size() if fly_icon.texture else Vector2(100, 100)
+	fly_icon.pivot_offset = fly_icon.size / 2.0
+	fly_icon.global_position = start_pos - fly_icon.pivot_offset
+	fly_icon.z_index = 100
+	$UILayer.add_child(fly_icon)
+
+	if drag_preview: drag_preview.hide()
+
+	if cabinet and cabinet.has_method("focus_item_face_to_camera") and drag_node and not is_cinematic_playing:
+		cabinet.focus_item_face_to_camera(drag_node, FOCUS_DURATION, true)
+
+	fly_tween = create_tween().set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+	fly_tween.tween_interval(FOCUS_DURATION)
+	fly_tween.tween_callback(_on_fly_back_focus_done.bind(my_gen, fly_icon, drag_node))

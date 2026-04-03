@@ -213,23 +213,53 @@ func _align_icon_in_bbox(icon: TextureRect, _item_id: int, current_shape: Array,
 
 	icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-	icon.size = Vector2(bbox_w, bbox_h)
+
+	# Инвертируем контейнер перед поворотом, если предмет стоит боком
+	if int(rot_deg) % 180 != 0:
+		icon.size = Vector2(bbox_h, bbox_w)
+	else:
+		icon.size = Vector2(bbox_w, bbox_h)
+
 	icon.pivot_offset = icon.size / 2.0
 	icon.rotation_degrees = rot_deg
+
 	var bbox_center := Vector2(bbox_w, bbox_h) / 2.0
 	icon.position = bbox_center - icon.pivot_offset
+
+func _shake_item(root_cell: Control) -> void:
+	if not root_cell:
+		return
+	var icon = root_cell.get_node_or_null("ItemIcon")
+	if not icon:
+		return
+	var orig_rot = root_cell.get_meta("rot_deg", 0)
+	if root_cell.has_meta("shake_tween"):
+		var old_tw = root_cell.get_meta("shake_tween")
+		if old_tw and old_tw.is_valid():
+			old_tw.kill()
+	var tw = create_tween().set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
+	root_cell.set_meta("shake_tween", tw)
+	tw.tween_property(icon, "rotation_degrees", orig_rot + 15, 0.05)
+	tw.tween_property(icon, "rotation_degrees", orig_rot - 15, 0.1)
+	tw.tween_property(icon, "rotation_degrees", orig_rot, 0.05)
 
 # ==========================================================
 # --- МОНОЛИТНАЯ ОТРИСОВКА ---
 # ==========================================================
 func _get_merged_stylebox(shape: Array, offset: Vector2, is_focused: bool, is_preview: bool) -> StyleBoxFlat:
 	var style = StyleBoxFlat.new()
-	style.bg_color = Color("#401E0D") 
-	if is_preview: style.border_color = Color("#FFAE3C") 
-	else: style.border_color = Color("#ffffff") if is_focused else Color("#FFAE3C")
+	style.bg_color = Color("#401E0D")
 	style.set_border_width_all(6)
-	style.set_corner_radius_all(12) 
+	style.set_corner_radius_all(12)
 	style.anti_aliasing = true
+
+	if ItemManager.is_edit_mode:
+		if is_focused or is_preview:
+			style.border_color = Color("#ffffff")
+		else:
+			style.border_color = Color("#FFAE3C")
+	else:
+		style.border_color = Color("#5C3621")
 
 	if shape.has(offset + Vector2(1, 0)):
 		style.border_width_right = 0; style.corner_radius_top_right = 0; style.corner_radius_bottom_right = 0
@@ -438,13 +468,14 @@ func _input(event):
 					_show_icons_for_shape(active_cell, active_shape)
 				else:
 					_show_icons_for_shape(active_cell, active_shape)
+					_shake_item(active_cell)
 				_update_grid_visuals()
 				get_viewport().set_input_as_handled()
 	if event is InputEventMouseMotion and is_dragging_internal:
 		update_external_drag_preview(mouse_pos)
 		get_viewport().set_input_as_handled()
 
-func try_add_item(item_id: int, mouse_pos: Vector2, drag_node: Node3D = null) -> bool:
+func try_add_item(item_id: int, _mouse_pos: Vector2, drag_node: Node3D = null) -> bool:
 	var item_data = ItemManager.items_db.get(item_id)
 	if not item_data:
 		return false
@@ -455,8 +486,8 @@ func try_add_item(item_id: int, mouse_pos: Vector2, drag_node: Node3D = null) ->
 	else:
 		shape = item_data.get("shape", [Vector2.ZERO])
 
-	var hotspot: Vector2 = mouse_pos + drag_pointer_offset
-	var target_root = _get_cell_at_pos(hotspot)
+	var preview_root_pos = drag_preview_container.global_position + Vector2(10, 10)
+	var target_root = _get_cell_at_pos(preview_root_pos)
 	if not target_root:
 		target_root = _find_first_free_slot(shape)
 

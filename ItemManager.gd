@@ -216,3 +216,10 @@ func _rotate_shape_norm(shape: Array, rot: int) -> Array:
 		for p in temp:
 			result.append(p - Vector2(min_x, min_y))
 	return result
+
+func unmark_item_as_found(item_id: int):
+	for item in current_order:
+		if item["id"] == item_id and item["found"]:
+			item["found"] = false
+			combo_score = max(0, combo_score - 1)
+			break
