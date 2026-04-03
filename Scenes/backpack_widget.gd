@@ -1,5 +1,8 @@
 extends Control
 
+const GamePaletteResource = preload("res://game_palette.gd")
+var palette: GamePaletteResource
+
 @export_group("Drag Preview")
 @export var drag_smooth_speed: float = 25.0
 @export var drag_pointer_offset: Vector2 = Vector2(0, -120)
@@ -24,6 +27,11 @@ var target_preview_pos: Vector2 = Vector2.ZERO
 var _drag_preview_shape: Array = []
 
 func _ready():
+	if ResourceLoader.exists("res://game_palette.tres"):
+		palette = load("res://game_palette.tres")
+	else:
+		palette = GamePaletteResource.new()
+
 	hide()
 	modulate.a = 0.0
 	
@@ -248,18 +256,19 @@ func _shake_item(root_cell: Control) -> void:
 # ==========================================================
 func _get_merged_stylebox(shape: Array, offset: Vector2, is_focused: bool, is_preview: bool) -> StyleBoxFlat:
 	var style = StyleBoxFlat.new()
-	style.bg_color = Color("#401E0D")
 	style.set_border_width_all(6)
 	style.set_corner_radius_all(12)
 	style.anti_aliasing = true
 
-	if ItemManager.is_edit_mode:
-		if is_focused or is_preview:
-			style.border_color = Color("#ffffff")
-		else:
-			style.border_color = Color("#FFAE3C")
+	if is_preview:
+		style.bg_color = palette.puz_drag_valid_bg
+		style.border_color = palette.puz_drag_valid_border
+	elif ItemManager.is_edit_mode:
+		style.bg_color = palette.puz_edit_focused_bg if is_focused else palette.puz_edit_unfocused_bg
+		style.border_color = palette.puz_edit_focused_border if is_focused else palette.puz_edit_unfocused_border
 	else:
-		style.border_color = Color("#5C3621")
+		style.bg_color = palette.puz_normal_bg
+		style.border_color = palette.puz_normal_border
 
 	if shape.has(offset + Vector2(1, 0)):
 		style.border_width_right = 0; style.corner_radius_top_right = 0; style.corner_radius_bottom_right = 0
@@ -282,11 +291,9 @@ func _draw_merged_item(_item_id: int, start_cell: Control, shape: Array, is_focu
 		if not target_cell: continue
 
 		var rect = Rect2(target_cell.position, target_cell.size)
-		var expand = 3.0 
-		if shape.has(offset + Vector2(1, 0)): rect.size.x += spacing.x + expand
-		if shape.has(offset + Vector2(0, 1)): rect.size.y += spacing.y + expand
-		if shape.has(offset + Vector2(-1, 0)): rect.position.x -= expand; rect.size.x += expand
-		if shape.has(offset + Vector2(0, -1)): rect.position.y -= expand; rect.size.y += expand
+
+		if shape.has(offset + Vector2(1, 0)): rect.size.x += spacing.x
+		if shape.has(offset + Vector2(0, 1)): rect.size.y += spacing.y
 
 		var style = _get_merged_stylebox(shape, offset, is_focused, false)
 		style.draw(grid.get_canvas_item(), rect)
@@ -351,11 +358,9 @@ func build_drag_preview(item_id: int, shape: Array, rot_deg: int = 0):
 		panel.add_theme_stylebox_override("panel", style)
 		var p_pos = Vector2(offset.x * (c_size.x + spacing.x), offset.y * (c_size.y + spacing.y))
 		var p_size = c_size
-		var expand = 3.0
-		if shape.has(offset + Vector2(1, 0)): p_size.x += spacing.x + expand
-		if shape.has(offset + Vector2(0, 1)): p_size.y += spacing.y + expand
-		if shape.has(offset + Vector2(-1, 0)): p_pos.x -= expand; p_size.x += expand
-		if shape.has(offset + Vector2(0, -1)): p_pos.y -= expand; p_size.y += expand
+
+		if shape.has(offset + Vector2(1, 0)): p_size.x += spacing.x
+		if shape.has(offset + Vector2(0, 1)): p_size.y += spacing.y
 
 		panel.position = p_pos
 		panel.size = p_size
@@ -399,11 +404,18 @@ func _update_drag_preview_pos(mouse_pos: Vector2) -> void:
 	var hotspot: Vector2 = mouse_pos + drag_pointer_offset
 	var root_cell: Control = _get_cell_at_pos(hotspot)
 
-	if (
-		root_cell
-		and not _drag_preview_shape.is_empty()
-		and _can_place_shape(root_cell, _drag_preview_shape, is_dragging_internal)
-	):
+	var is_valid = false
+
+	if root_cell and not _drag_preview_shape.is_empty():
+		is_valid = _can_place_shape(root_cell, _drag_preview_shape, is_dragging_internal)
+		if not is_valid:
+			var obstacles = _get_obstacle_roots(root_cell, _drag_preview_shape)
+			if obstacles.size() > 0:
+				var multi_swap = _calculate_multi_swap(root_cell, _drag_preview_shape, obstacles)
+				if multi_swap.size() > 0:
+					is_valid = true
+
+	if is_valid:
 		target_preview_pos = root_cell.global_position
 	else:
 		var half_size: Vector2 = _get_preview_pixel_size(_drag_preview_shape) / 2.0
@@ -411,6 +423,7 @@ func _update_drag_preview_pos(mouse_pos: Vector2) -> void:
 
 func hide_external_drag_preview():
 	drag_preview_container.hide()
+	_update_grid_visuals()
 
 # ==========================================================
 # --- ОСТАЛЬНАЯ ЛОГИКА ---
@@ -451,18 +464,49 @@ func _input(event):
 					_close_edit_mode()
 		else:
 			if is_dragging_internal:
-				is_dragging_internal = false
 				hide_external_drag_preview()
 				var hotspot: Vector2 = mouse_pos + drag_pointer_offset
 				var target_root = _get_cell_at_pos(hotspot)
 				var old_rot = active_cell.get_meta("rot_deg", 0)
 				var success = false
 
-				if target_root and _can_place_shape(target_root, active_shape, true):
-					_clear_item_from_grid(active_cell, active_shape)
-					active_cell = target_root
-					_place_item_in_grid(active_cell, active_item_id, active_shape, old_rot)
-					success = true
+				if target_root:
+					if _can_place_shape(target_root, active_shape, true):
+						_clear_item_from_grid(active_cell, active_shape)
+						active_cell = target_root
+						_place_item_in_grid(active_cell, active_item_id, active_shape, old_rot)
+						success = true
+					else:
+						var obstacles = _get_obstacle_roots(target_root, active_shape)
+						if obstacles.size() > 0:
+							var multi_swap = _calculate_multi_swap(target_root, active_shape, obstacles)
+							if multi_swap.size() > 0:
+								var saved_obs = []
+								for swap_entry in multi_swap:
+									var o_root = swap_entry["obs_root"]
+									var old_shape_to_clear = o_root.get_meta("current_shape")
+									saved_obs.append({
+										"id": swap_entry["id"],
+										"shape": swap_entry["shape"],
+										"new_root": swap_entry["new_root"],
+										"rot": swap_entry["new_rot"],
+										"old_rot": swap_entry["old_rot"],
+										"drag": o_root.get_meta("source_drag_node") if o_root.has_meta("source_drag_node") else null,
+										"pos": o_root.global_position + (o_root.size / 2.0)
+									})
+									_clear_item_from_grid(o_root, old_shape_to_clear)
+
+								_clear_item_from_grid(active_cell, active_shape)
+								active_cell = target_root
+								_place_item_in_grid(active_cell, active_item_id, active_shape, old_rot)
+
+								for obs in saved_obs:
+									_place_item_in_grid(obs["new_root"], obs["id"], obs["shape"], obs["rot"])
+									if obs["drag"]: obs["new_root"].set_meta("source_drag_node", obs["drag"])
+									_animate_swap_fly(obs["new_root"], obs["pos"], obs["old_rot"])
+								success = true
+
+				is_dragging_internal = false
 
 				if success:
 					_show_icons_for_shape(active_cell, active_shape)
@@ -498,48 +542,38 @@ func try_add_item(item_id: int, _mouse_pos: Vector2, drag_node: Node3D = null) -
 		ItemManager.mark_item_as_found(item_id)
 		return true
 
-	# 2. Попытка вытеснить предмет (Swap), если под нами ровно 1 помеха
+	# 2. Попытка вытеснить предмет(ы) (Multi-Swap)
 	if target_root:
 		var obstacles = _get_obstacle_roots(target_root, shape)
-		if obstacles.size() == 1:
-			var obs_root = obstacles[0]
+		if obstacles.size() > 0:
+			var multi_swap = _calculate_multi_swap(target_root, shape, obstacles)
+			if multi_swap.size() > 0:
+				var saved_obs = []
+				for swap_entry in multi_swap:
+					var o_root = swap_entry["obs_root"]
+					var old_shape_to_clear = o_root.get_meta("current_shape")
+					saved_obs.append({
+						"id": swap_entry["id"],
+						"shape": swap_entry["shape"],
+						"new_root": swap_entry["new_root"],
+						"rot": swap_entry["new_rot"],
+						"old_rot": swap_entry["old_rot"],
+						"drag": o_root.get_meta("source_drag_node") if o_root.has_meta("source_drag_node") else null,
+						"pos": o_root.global_position + (o_root.size / 2.0)
+					})
+					_clear_item_from_grid(o_root, old_shape_to_clear)
 
-			var obs_id = -1
-			for c_cell in grid.get_children():
-				if c_cell.has_meta("root_cell") and c_cell.get_meta("root_cell") == obs_root:
-					obs_id = c_cell.get_meta("occupied_by_id", -1)
-					if obs_id != -1:
-						break
+				_place_item_in_grid(target_root, item_id, shape, 0)
+				if drag_node: target_root.set_meta("source_drag_node", drag_node)
 
-			if obs_id != -1:
-				var obs_shape = obs_root.get_meta("current_shape")
-				var obs_rot = obs_root.get_meta("rot_deg", 0)
-				var obs_drag = obs_root.get_meta("source_drag_node") if obs_root.has_meta("source_drag_node") else null
-				var obs_pos = obs_root.global_position + (obs_root.size / 2.0)
+				for obs in saved_obs:
+					_place_item_in_grid(obs["new_root"], obs["id"], obs["shape"], obs["rot"])
+					if obs["drag"]: obs["new_root"].set_meta("source_drag_node", obs["drag"])
+					_animate_swap_fly(obs["new_root"], obs["pos"], obs["old_rot"])
 
-				_clear_item_from_grid(obs_root, obs_shape)
-
-				# Площадь освобождена — проверяем новый предмет без ignore_active
-				if _can_place_shape(target_root, shape):
-					_place_item_in_grid(target_root, item_id, shape, 0)
-
-					var free_slot = _find_first_free_slot(obs_shape)
-					if free_slot:
-						_place_item_in_grid(free_slot, obs_id, obs_shape, obs_rot)
-						if obs_drag: free_slot.set_meta("source_drag_node", obs_drag)
-						if drag_node: target_root.set_meta("source_drag_node", drag_node)
-
-						_animate_swap_fly(free_slot, obs_pos)
-						_close_edit_mode()
-						ItemManager.mark_item_as_found(item_id)
-						return true
-					else:
-						_clear_item_from_grid(target_root, shape)
-						_place_item_in_grid(obs_root, obs_id, obs_shape, obs_rot)
-						if obs_drag: obs_root.set_meta("source_drag_node", obs_drag)
-				else:
-					_place_item_in_grid(obs_root, obs_id, obs_shape, obs_rot)
-					if obs_drag: obs_root.set_meta("source_drag_node", obs_drag)
+				_close_edit_mode()
+				ItemManager.mark_item_as_found(item_id)
+				return true
 
 	# 3. АВТО-УСТАНОВКА (План Б)
 	var auto_slot = _find_first_free_slot(shape)
@@ -604,14 +638,139 @@ func _get_obstacle_roots(root_cell: Control, shape: Array) -> Array:
 				roots.append(r)
 	return roots
 
-func _animate_swap_fly(new_root: Control, old_global_pos: Vector2) -> void:
+func _calculate_multi_swap(target_root: Control, drag_shape: Array, obstacles: Array) -> Array:
+	var result: Array = []
+	var saved_data: Array = []
+
+	var active_saved_id = -1
+	var active_saved_root: Control = null
+	if is_dragging_internal and active_cell:
+		active_saved_root = active_cell
+		var a_coords = _get_cell_coords(active_cell)
+		var a_c = _get_cell_by_coords(a_coords)
+		if a_c and a_c.has_meta("occupied_by_id"):
+			active_saved_id = a_c.get_meta("occupied_by_id")
+		for offset in active_shape:
+			var t_c = _get_cell_by_coords(a_coords + Vector2i(offset.x, offset.y))
+			if t_c:
+				if t_c.has_meta("occupied_by_id"):
+					t_c.remove_meta("occupied_by_id")
+				if t_c.has_meta("root_cell"):
+					t_c.remove_meta("root_cell")
+
+	for obs in obstacles:
+		var o_shape = obs.get_meta("current_shape")
+		var root_coords = _get_cell_coords(obs)
+		var oid = -1
+		var first_cell = _get_cell_by_coords(root_coords)
+		if first_cell and first_cell.has_meta("occupied_by_id"):
+			oid = first_cell.get_meta("occupied_by_id")
+		saved_data.append({"root": obs, "shape": o_shape, "id": oid, "coords": root_coords})
+		for offset in o_shape:
+			var t_c = _get_cell_by_coords(root_coords + Vector2i(offset.x, offset.y))
+			if t_c:
+				if t_c.has_meta("occupied_by_id"):
+					t_c.remove_meta("occupied_by_id")
+				if t_c.has_meta("root_cell"):
+					t_c.remove_meta("root_cell")
+
+	var is_valid = false
+	if _can_place_shape(target_root, drag_shape):
+		is_valid = true
+		var target_coords = _get_cell_coords(target_root)
+		for offset in drag_shape:
+			var t_c = _get_cell_by_coords(target_coords + Vector2i(offset.x, offset.y))
+			if t_c:
+				t_c.set_meta("occupied_by_id", -999)
+				t_c.set_meta("root_cell", target_root)
+
+		for obs_data in saved_data:
+			var found_root: Control = null
+			var best_shape: Array = []
+			var best_rot = 0
+			var obs_root_ctrl: Control = obs_data["root"]
+			var old_rot_meta: float = obs_root_ctrl.get_meta("rot_deg", 0)
+
+			for rot_offset in [0, 90, 180, 270]:
+				var test_shape = _rotate_shape_normalized(obs_data["shape"], rot_offset)
+				for cell in grid.get_children():
+					if cell.has_node("ItemIcon") and _can_place_shape(cell, test_shape):
+						found_root = cell
+						best_shape = test_shape
+						best_rot = int(old_rot_meta + rot_offset) % 360
+						break
+				if found_root:
+					break
+
+			if found_root:
+				result.append({
+					"obs_root": obs_data["root"],
+					"new_root": found_root,
+					"shape": best_shape,
+					"id": obs_data["id"],
+					"new_rot": best_rot,
+					"old_rot": old_rot_meta
+				})
+				var fr_coords = _get_cell_coords(found_root)
+				for offset in best_shape:
+					var t_c2 = _get_cell_by_coords(fr_coords + Vector2i(offset.x, offset.y))
+					if t_c2:
+						t_c2.set_meta("occupied_by_id", -998)
+						t_c2.set_meta("root_cell", found_root)
+			else:
+				is_valid = false
+				break
+
+		for offset in drag_shape:
+			var t_c = _get_cell_by_coords(target_coords + Vector2i(offset.x, offset.y))
+			if t_c:
+				if t_c.has_meta("occupied_by_id"):
+					t_c.remove_meta("occupied_by_id")
+				if t_c.has_meta("root_cell"):
+					t_c.remove_meta("root_cell")
+		for res_entry in result:
+			var fr_coords = _get_cell_coords(res_entry["new_root"])
+			for offset in res_entry["shape"]:
+				var t_c = _get_cell_by_coords(fr_coords + Vector2i(offset.x, offset.y))
+				if t_c:
+					if t_c.has_meta("occupied_by_id"):
+						t_c.remove_meta("occupied_by_id")
+					if t_c.has_meta("root_cell"):
+						t_c.remove_meta("root_cell")
+
+	if not is_valid:
+		result.clear()
+
+	for obs_data in saved_data:
+		for offset in obs_data["shape"]:
+			var t_c = _get_cell_by_coords(obs_data["coords"] + Vector2i(offset.x, offset.y))
+			if t_c:
+				t_c.set_meta("occupied_by_id", obs_data["id"])
+				t_c.set_meta("root_cell", obs_data["root"])
+
+	if is_dragging_internal and active_cell and active_saved_id != -1:
+		var a_coords = _get_cell_coords(active_cell)
+		for offset in active_shape:
+			var t_c = _get_cell_by_coords(a_coords + Vector2i(offset.x, offset.y))
+			if t_c:
+				t_c.set_meta("occupied_by_id", active_saved_id)
+				t_c.set_meta("root_cell", active_saved_root)
+
+	return result
+
+func _animate_swap_fly(new_root: Control, old_global_pos: Vector2, old_rot: float) -> void:
 	var icon = new_root.get_node_or_null("ItemIcon")
-	if not icon or not icon.visible: return
+	if not icon or not icon.visible:
+		return
 	var final_pos = icon.position
+	var final_rot = icon.rotation_degrees
 	var offset = old_global_pos - new_root.global_position - (new_root.size / 2.0)
 	icon.position = offset
-	var tw = create_tween().set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+	icon.rotation_degrees = old_rot
+	var tw = create_tween().set_parallel(true).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
 	tw.tween_property(icon, "position", final_pos, 0.25)
+	var diff = wrapf(final_rot - old_rot, -180.0, 180.0)
+	tw.tween_property(icon, "rotation_degrees", old_rot + diff, 0.25)
 
 func _on_btn_rotate():
 	if not active_cell: return
