@@ -59,9 +59,6 @@ var potential_drag_tex: String = ""
 var potential_drag_node: Node3D = null 
 var current_drag_node: Node3D = null   
 var drag_start_pos: Vector2 = Vector2.ZERO
-var fly_tween: Tween
-var inner_fly_tween: Tween
-var fly_back_gen: int = 0
 const DRAG_THRESHOLD: float = 15.0 
 
 var cinematic_queue: int = 0
@@ -241,7 +238,6 @@ func _input(event):
 				backpack_widget.update_external_drag_preview(event.position)
 
 func _start_drag():
-	if fly_tween and fly_tween.is_running(): fly_tween.kill()
 	ItemManager.is_dragging_item = true
 	current_drag_node = potential_drag_node
 	if cabinet and cabinet.has_method("focus_item_face_to_camera") and current_drag_node and not is_cinematic_playing:
@@ -278,10 +274,6 @@ func _perform_drop():
 
 func _fly_back_and_cancel():
 	if autofill_cab_tween and autofill_cab_tween.is_running(): autofill_cab_tween.kill()
-	if inner_fly_tween and inner_fly_tween.is_running(): inner_fly_tween.kill()
-	if fly_tween and fly_tween.is_running(): fly_tween.kill()
-	fly_back_gen += 1
-	var my_gen := fly_back_gen
 	if backpack_widget and backpack_widget.has_method("hide_external_drag_preview"): backpack_widget.hide_external_drag_preview()
 	var node_to_return = current_drag_node
 	if node_to_return and is_instance_valid(node_to_return):
@@ -302,13 +294,9 @@ func _fly_back_and_cancel():
 		if cabinet and cabinet.has_method("focus_item_face_to_camera") and node_to_return and not is_cinematic_playing:
 			cabinet.focus_item_face_to_camera(node_to_return, FOCUS_DURATION, true)
 
-		fly_tween = create_tween().set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
-		fly_tween.tween_interval(FOCUS_DURATION)
-		fly_tween.tween_callback(_on_fly_back_focus_done.bind(my_gen, fly_icon, node_to_return))
-	else:
-		if node_to_return and is_instance_valid(node_to_return):
-			if node_to_return.has_method("show_item"): node_to_return.show_item()
-			else: node_to_return.show()
+		var local_fly_tween = create_tween().set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+		local_fly_tween.tween_interval(FOCUS_DURATION)
+		local_fly_tween.tween_callback(_run_fly_icon_return_after_focus.bind(fly_icon, node_to_return))
 	current_drag_node = null
 	potential_drag_id = -1; potential_drag_node = null; ItemManager.is_dragging_item = false
 
@@ -364,23 +352,18 @@ func start_game_flow():
 		if autofill_button: autofill_button.modulate.a = 1.0; autofill_button.show()
 	)
 
-func _on_fly_back_focus_done(my_gen: int, fly_icon: TextureRect, drag_node: Node3D) -> void:
-	if my_gen == fly_back_gen:
-		_tween_fly_icon_to_node3d(my_gen, fly_icon, drag_node)
-
-func _tween_fly_icon_to_node3d(my_gen: int, fly_icon: TextureRect, drag_node: Node3D) -> void:
+func _run_fly_icon_return_after_focus(fly_icon: TextureRect, drag_node: Node3D) -> void:
 	var cam = get_viewport().get_camera_3d()
 	var target_pos = drag_start_pos - fly_icon.pivot_offset
 	if cam and drag_node and is_instance_valid(drag_node):
 		target_pos = cam.unproject_position(drag_node.global_position) - fly_icon.pivot_offset
-	inner_fly_tween = create_tween().set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
-	inner_fly_tween.tween_property(fly_icon, "global_position", target_pos, 0.3)
-	inner_fly_tween.tween_callback(func():
-		if my_gen == fly_back_gen:
-			fly_icon.queue_free()
-			if drag_node and is_instance_valid(drag_node):
-				if drag_node.has_method("show_item"): drag_node.show_item()
-				else: drag_node.show()
+	var local_inner_tween = create_tween().set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+	local_inner_tween.tween_property(fly_icon, "global_position", target_pos, 0.3)
+	local_inner_tween.tween_callback(func():
+		fly_icon.queue_free()
+		if drag_node and is_instance_valid(drag_node):
+			if drag_node.has_method("show_item"): drag_node.show_item()
+			else: drag_node.show()
 	)
 
 func fly_back_to_cabinet(item_id: int, start_pos: Vector2, drag_node: Node3D):
@@ -388,10 +371,6 @@ func fly_back_to_cabinet(item_id: int, start_pos: Vector2, drag_node: Node3D):
 	if item_id == -1: ItemManager.is_dragging_item = false; return
 	ItemManager.unmark_item_as_found(item_id)
 	if autofill_cab_tween and autofill_cab_tween.is_running(): autofill_cab_tween.kill()
-	if inner_fly_tween and inner_fly_tween.is_running(): inner_fly_tween.kill()
-	if fly_tween and fly_tween.is_running(): fly_tween.kill()
-	fly_back_gen += 1
-	var my_gen := fly_back_gen
 	ItemManager.is_dragging_item = false
 	if not ItemManager.items_db.has(item_id):
 		if drag_node and is_instance_valid(drag_node):
@@ -414,6 +393,6 @@ func fly_back_to_cabinet(item_id: int, start_pos: Vector2, drag_node: Node3D):
 	if cabinet and cabinet.has_method("focus_item_face_to_camera") and drag_node and not is_cinematic_playing:
 		cabinet.focus_item_face_to_camera(drag_node, FOCUS_DURATION, true)
 
-	fly_tween = create_tween().set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
-	fly_tween.tween_interval(FOCUS_DURATION)
-	fly_tween.tween_callback(_on_fly_back_focus_done.bind(my_gen, fly_icon, drag_node))
+	var local_fly_tween = create_tween().set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+	local_fly_tween.tween_interval(FOCUS_DURATION)
+	local_fly_tween.tween_callback(_run_fly_icon_return_after_focus.bind(fly_icon, drag_node))

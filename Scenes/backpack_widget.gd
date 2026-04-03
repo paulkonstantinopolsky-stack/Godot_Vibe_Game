@@ -7,6 +7,14 @@ var palette: GamePaletteResource
 @export var drag_smooth_speed: float = 25.0
 @export var drag_pointer_offset: Vector2 = Vector2(0, -120)
 
+@export_group("Backpack Magnetism")
+@export var magnet_enabled: bool = true
+@export var magnet_max_offset: float = 60.0 # Сильно увеличено для ПК
+@export var magnet_radius: float = 2500.0 # Покрывает весь экран
+@export var magnet_smoothness: float = 12.0
+@export var magnet_scale_bump: float = 1.02
+@export var magnet_max_rotation: float = 2.0 # НОВАЯ ФИЧА: наклон рюкзака
+
 @onready var backpack_bg = $BackpackBG
 @onready var grid = $BackpackBG/CenterContainer/GridContainer 
 @onready var edit_menu = get_node_or_null("EditMenu") 
@@ -23,6 +31,10 @@ var is_dragging_internal: bool = false
 var drag_preview_container: Control
 
 var target_preview_pos: Vector2 = Vector2.ZERO
+var bg_base_pos: Vector2 = Vector2.ZERO
+var bg_base_scale: Vector2 = Vector2.ONE
+var bg_base_rot: float = 0.0
+var is_magnet_ready: bool = false # Блокирует магнит во время анимации появления
 ## Форма текущего превью (для магнита и проверки ячейки)
 var _drag_preview_shape: Array = []
 
@@ -47,10 +59,42 @@ func _ready():
 	_update_grid_visuals()
 
 func _process(delta: float) -> void:
+	# 1. Логика превью
 	if drag_preview_container and drag_preview_container.visible:
 		var weight: float = clampf(drag_smooth_speed * delta, 0.0, 1.0)
 		drag_preview_container.global_position = drag_preview_container.global_position.lerp(
 			target_preview_pos, weight)
+
+	# 2. Логика магнетизма рюкзака
+	if not magnet_enabled or not is_magnet_ready:
+		return
+
+	var target_bg_pos = bg_base_pos
+	var target_bg_scale = bg_base_scale
+	var target_bg_rot = bg_base_rot
+
+	if ItemManager.is_dragging_item and not is_dragging_internal and drag_preview_container.visible:
+		var mouse_pos = get_global_mouse_position()
+		var bg_global_center = backpack_bg.global_position + (backpack_bg.size / 2.0)
+		var dist = mouse_pos.distance_to(bg_global_center)
+
+		if dist < magnet_radius:
+			var raw_pull = 1.0 - (dist / magnet_radius)
+			# Корень из raw_pull заставляет магнит реагировать гораздо сильнее даже на дальних дистанциях
+			var pull_strength = pow(raw_pull, 0.5)
+
+			var dir = bg_global_center.direction_to(mouse_pos)
+
+			target_bg_pos = bg_base_pos + (dir * magnet_max_offset * pull_strength)
+			target_bg_scale = bg_base_scale * lerpf(1.0, magnet_scale_bump, pull_strength)
+
+			# Наклон в сторону пальца создает эффект "открытого рта" и параллакса
+			target_bg_rot = bg_base_rot + (dir.x * magnet_max_rotation * pull_strength)
+
+	var m_weight = clampf(magnet_smoothness * delta, 0.0, 1.0)
+	backpack_bg.position = backpack_bg.position.lerp(target_bg_pos, m_weight)
+	backpack_bg.scale = backpack_bg.scale.lerp(target_bg_scale, m_weight)
+	backpack_bg.rotation_degrees = lerpf(backpack_bg.rotation_degrees, target_bg_rot, m_weight)
 
 # ==========================================================
 # --- АЛГОРИТМ АВТО-СБОРКИ (BIN PACKING) ---
@@ -945,9 +989,16 @@ func _hide_icons_for_shape(root: Control, _shape: Array): root.get_node("ItemIco
 func _show_icons_for_shape(root: Control, _shape: Array): root.get_node("ItemIcon").show()
 
 func start_appear_animation():
+	is_magnet_ready = false
 	show(); modulate.a = 0.0; var final_y = backpack_bg.position.y
 	backpack_bg.position.y += hide_pos_offset
 	var tw = create_tween().set_parallel(true).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
 	tw.tween_property(self, "modulate:a", 1.0, 0.5); tw.tween_property(backpack_bg, "position:y", final_y, 0.7)
 	backpack_bg.pivot_offset = backpack_bg.size / 2.0; backpack_bg.scale = Vector2(0.7, 0.7)
 	tw.tween_property(backpack_bg, "scale", Vector2.ONE, 0.7).set_trans(Tween.TRANS_BACK)
+	tw.chain().tween_callback(func():
+		bg_base_pos = backpack_bg.position
+		bg_base_scale = backpack_bg.scale
+		bg_base_rot = backpack_bg.rotation_degrees
+		is_magnet_ready = true # Включаем магнит только когда рюкзак встал на место
+	)
