@@ -281,19 +281,29 @@ func _get_merged_stylebox(shape: Array, offset: Vector2, is_focused: bool, is_pr
 	return style
 
 func _draw_merged_item(_item_id: int, start_cell: Control, shape: Array, is_focused: bool):
-	var h_sep = grid.get_theme_constant("h_separation")
-	var v_sep = grid.get_theme_constant("v_separation")
-	var spacing = Vector2(max(0, h_sep), max(0, v_sep))
-
 	for offset in shape:
 		var target_coords = _get_cell_coords(start_cell) + Vector2i(offset.x, offset.y)
 		var target_cell = _get_cell_by_coords(target_coords)
 		if not target_cell: continue
 
-		var rect = Rect2(target_cell.position, target_cell.size)
+		# Округляем базовые координаты
+		var r_pos = target_cell.position.round()
+		var r_size = target_cell.size.round()
+		var rect = Rect2(r_pos, r_size)
 
-		if shape.has(offset + Vector2(1, 0)): rect.size.x += spacing.x
-		if shape.has(offset + Vector2(0, 1)): rect.size.y += spacing.y
+		var overlap = 2.0 # Идеальный нахлест для непрозрачных цветов
+
+		if shape.has(offset + Vector2(1, 0)):
+			var next_cell = _get_cell_by_coords(target_coords + Vector2i(1, 0))
+			if next_cell:
+				var next_pos = next_cell.position.round()
+				rect.size.x = (next_pos.x - rect.position.x) + overlap
+
+		if shape.has(offset + Vector2(0, 1)):
+			var next_cell = _get_cell_by_coords(target_coords + Vector2i(0, 1))
+			if next_cell:
+				var next_pos = next_cell.position.round()
+				rect.size.y = (next_pos.y - rect.position.y) + overlap
 
 		var style = _get_merged_stylebox(shape, offset, is_focused, false)
 		style.draw(grid.get_canvas_item(), rect)
@@ -356,11 +366,22 @@ func build_drag_preview(item_id: int, shape: Array, rot_deg: int = 0):
 		var panel = Panel.new()
 		var style = _get_merged_stylebox(shape, offset, false, true)
 		panel.add_theme_stylebox_override("panel", style)
-		var p_pos = Vector2(offset.x * (c_size.x + spacing.x), offset.y * (c_size.y + spacing.y))
-		var p_size = c_size
 
-		if shape.has(offset + Vector2(1, 0)): p_size.x += spacing.x
-		if shape.has(offset + Vector2(0, 1)): p_size.y += spacing.y
+		# Математически вычисляем позицию в сетке превью и округляем
+		var raw_pos = Vector2(offset.x * (c_size.x + spacing.x), offset.y * (c_size.y + spacing.y))
+		var p_pos = raw_pos.round()
+		var p_size = c_size.round()
+
+		var overlap = 2.0 # Идеальный нахлест для непрозрачных цветов
+
+		# Тянем край до следующей ячейки + нахлест
+		if shape.has(offset + Vector2(1, 0)):
+			var next_raw_pos = Vector2((offset.x + 1) * (c_size.x + spacing.x), offset.y * (c_size.y + spacing.y))
+			p_size.x = (next_raw_pos.round().x - p_pos.x) + overlap
+
+		if shape.has(offset + Vector2(0, 1)):
+			var next_raw_pos = Vector2(offset.x * (c_size.x + spacing.x), (offset.y + 1) * (c_size.y + spacing.y))
+			p_size.y = (next_raw_pos.round().y - p_pos.y) + overlap
 
 		panel.position = p_pos
 		panel.size = p_size
