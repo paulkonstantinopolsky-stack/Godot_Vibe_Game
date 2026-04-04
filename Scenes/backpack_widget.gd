@@ -10,8 +10,6 @@ var palette: GamePaletteResource
 @export_group("Backpack Magnetism")
 @export var magnet_enabled: bool = true
 @export var magnet_max_offset: float = 120.0 # Выдвигаем рюкзак дальше (было 60)
-@export var magnet_radius: float = 2500.0
-@export var magnet_stabilization_radius: float = 300.0 # Мертвая зона для точного прицеливания
 @export var magnet_smoothness: float = 12.0
 @export var magnet_scale_bump: float = 1.08 # Увеличиваем сильнее (было 1.02)
 @export var magnet_max_rotation: float = 2.0
@@ -45,9 +43,10 @@ var bg_base_rot: float = 0.0
 var is_magnet_ready: bool = false # Блокирует магнит во время анимации появления
 var is_preview_snapped: bool = false
 var _snapped_root_cell: Control = null
-var mag_target_pos: Vector2 = Vector2.ZERO
-var mag_target_scale: Vector2 = Vector2.ONE
-var mag_target_rot: float = 0.0
+var mag_frozen_pos: Vector2 = Vector2.ZERO
+var mag_frozen_scale: Vector2 = Vector2.ONE
+var mag_frozen_rot: float = 0.0
+var is_backpack_frozen: bool = false
 ## Форма текущего превью (для магнита и проверки ячейки)
 var _drag_preview_shape: Array = []
 
@@ -94,32 +93,45 @@ func _process(delta: float) -> void:
 	var target_bg_rot = bg_base_rot
 
 	if ItemManager.is_dragging_item and not is_dragging_internal and drag_preview_container.visible:
-		if is_preview_snapped:
-			# ЗАМОРОЗКА: Рюкзак замирает в том положении, в котором находился в момент примагничивания
-			target_bg_pos = mag_target_pos
-			target_bg_scale = mag_target_scale
-			target_bg_rot = mag_target_rot
+		var hotspot = get_global_mouse_position() + drag_pointer_offset
+		# Берем границы рюкзака и чуть расширяем их (на 20px) для мягкости входа
+		var bg_rect = backpack_bg.get_global_rect().grow(20.0)
+		var is_over_bg = bg_rect.has_point(hotspot)
+
+		if is_over_bg:
+			if not is_backpack_frozen:
+				# ПАЛЕЦ ВОШЕЛ В ЗОНУ РЮКЗАКА: Делаем снимок магнита и встаем на ручник
+				is_backpack_frozen = true
+				var targets = _calculate_current_magnet_targets()
+				mag_frozen_pos = targets.pos
+				mag_frozen_scale = targets.scale
+				mag_frozen_rot = targets.rot
+
+			# ПРИМЕНЯЕМ ЗАМОРОЖЕННЫЕ КООРДИНАТЫ
+			target_bg_pos = mag_frozen_pos
+			target_bg_scale = mag_frozen_scale
+			target_bg_rot = mag_frozen_rot
 		else:
-			# АКТИВНЫЙ МАГНИТ: вычисляем И применяем к целям
+			if is_backpack_frozen:
+				# ПАЛЕЦ ПОКИНУЛ РЮКЗАК: Снимаем с ручника
+				is_backpack_frozen = false
+
+			# АКТИВНЫЙ МАГНИТ (Палец снаружи)
 			var targets = _calculate_current_magnet_targets()
 			target_bg_pos = targets.pos
 			target_bg_scale = targets.scale
 			target_bg_rot = targets.rot
 	else:
-		# СБРОС: Если мы ничего не тащим, сбрасываем замороженные цели на центр
-		mag_target_pos = bg_base_pos
-		mag_target_scale = bg_base_scale
-		mag_target_rot = bg_base_rot
+		# СБРОС
 		is_preview_snapped = false
 		_snapped_root_cell = null
+		is_backpack_frozen = false
 
-	# Плавно применяем трансформации
 	var m_weight = clampf(magnet_smoothness * delta, 0.0, 1.0)
 	backpack_bg.position = backpack_bg.position.lerp(target_bg_pos, m_weight)
 	backpack_bg.scale = backpack_bg.scale.lerp(target_bg_scale, m_weight)
 	backpack_bg.rotation_degrees = lerpf(backpack_bg.rotation_degrees, target_bg_rot, m_weight)
 
-	# Синхронизация наклона превью
 	if drag_preview_container.visible:
 		drag_preview_container.rotation_degrees = backpack_bg.rotation_degrees
 
@@ -506,37 +518,37 @@ func _find_closest_cell_in_radius(hotspot: Vector2, radius: float) -> Control:
 
 func _calculate_current_magnet_targets() -> Dictionary:
 	var hotspot = get_global_mouse_position() + drag_pointer_offset
+
 	var current_local_offset = backpack_bg.position - bg_base_pos
 	var base_global_center = (backpack_bg.global_position - current_local_offset) + (backpack_bg.size / 2.0)
+
 	var dist = hotspot.distance_to(base_global_center)
+	var dir = base_global_center.direction_to(hotspot)
 
-	var res = {"pos": bg_base_pos, "scale": bg_base_scale, "rot": bg_base_rot}
+	# МАТЕМАТИКА "СОБАКИ НА ПОВОДКЕ":
+	# Как только палец отдаляется от центра дальше чем на 150 пикселей, тяга становится 100%
+	# Рюкзак всегда "дотянут" до лимита навстречу пальцу и не отступает при сближении
+	var pull_strength = clampf(dist / 150.0, 0.0, 1.0)
 
-	if dist < magnet_radius and dist > magnet_stabilization_radius:
-		var pull_range = magnet_radius - magnet_stabilization_radius
-		var dist_in_range = dist - magnet_stabilization_radius
-		var raw_pull = 1.0 - (dist_in_range / pull_range)
-		var pull_strength = pow(raw_pull, 0.5)
-		var dir = base_global_center.direction_to(hotspot)
+	var offset_vector = dir * (magnet_max_offset * pull_strength)
 
-		res.pos = bg_base_pos + (dir * magnet_max_offset * pull_strength)
-		res.scale = bg_base_scale * lerpf(1.0, magnet_scale_bump, pull_strength)
-		res.rot = bg_base_rot + (dir.x * magnet_max_rotation * pull_strength)
-	return res
+	return {
+		"pos": bg_base_pos + offset_vector,
+		"scale": bg_base_scale * lerpf(1.0, magnet_scale_bump, pull_strength),
+		"rot": bg_base_rot + (dir.x * magnet_max_rotation * pull_strength)
+	}
 
 func _update_drag_preview_pos(mouse_pos: Vector2) -> void:
 	var hotspot: Vector2 = mouse_pos + drag_pointer_offset
-
-	# Учитываем масштаб превью для идеального центрирования:
 	var current_preview_scale = drag_preview_container.scale if drag_preview_container else Vector2.ONE
 	var half_size: Vector2 = (_get_preview_pixel_size(_drag_preview_shape) * current_preview_scale) / 2.0
 
-	# ШАГ 1: Ищем новую ячейку (строго по пальцу или радиусу захвата)
+	# 1. Поиск ячейки (Только строго под пальцем или захват снаружи)
 	var current_cell = _get_cell_at_pos(hotspot)
 	if not current_cell and not is_preview_snapped:
 		current_cell = _find_closest_cell_in_radius(hotspot, grid_catch_radius)
 
-	# ШАГ 2: Проверяем валидность новой ячейки
+	# 2. Проверка валидности
 	var is_valid = false
 	if current_cell and not _drag_preview_shape.is_empty():
 		is_valid = _can_place_shape(current_cell, _drag_preview_shape, is_dragging_internal)
@@ -545,36 +557,28 @@ func _update_drag_preview_pos(mouse_pos: Vector2) -> void:
 			if obstacles.size() > 0 and _calculate_multi_swap(current_cell, _drag_preview_shape, obstacles).size() > 0:
 				is_valid = true
 
-	# ШАГ 3: ГИСТЕРЕЗИС (Если новая позиция невалидна, но мы были приклеены к старой)
+	# 3. ГИСТЕРЕЗИС ПО ВИДЖЕТУ РЮКЗАКА
 	if not is_valid and is_preview_snapped and _snapped_root_cell:
-		var last_center = _snapped_root_cell.global_position + (_snapped_root_cell.size / 2.0)
-		if hotspot.distance_to(last_center) <= grid_release_radius:
-			# Резинка еще держит! Принудительно остаемся на старой валидной ячейке
+		# Берем глобальные границы рюкзака и расширяем их на "резинку" (grid_release_radius)
+		var bg_rect = backpack_bg.get_global_rect().grow(grid_release_radius)
+
+		if bg_rect.has_point(hotspot):
+			# Палец все еще над рюкзаком (даже в пустом углу или над занятой ячейкой)!
+			# Принудительно оставляем предмет на последней удачной ячейке.
 			current_cell = _snapped_root_cell
 			is_valid = true
 
-	# ШАГ 4: Применяем позицию и состояния
+	# 4. Применение состояния
 	if is_valid:
 		if not is_preview_snapped:
-			# ВХОД В СЕТКУ (Мгновенный снимок магнита)
+			# ВХОД В СЕТКУ (Первый щелчок предмета)
 			is_preview_snapped = true
 			_current_snap_speed_mult = fast_snap_multiplier
-			var targets = _calculate_current_magnet_targets()
-			mag_target_pos = targets.pos
-			mag_target_scale = targets.scale
-			mag_target_rot = targets.rot
 
 		_snapped_root_cell = current_cell
 		target_preview_pos = current_cell.global_position
 	else:
-		# ВЫХОД ИЛИ СВОБОДНЫЙ ПОЛЕТ
-		if is_preview_snapped:
-			# Только что оторвались (порвали резинку) - обновляем магнит
-			var targets = _calculate_current_magnet_targets()
-			mag_target_pos = targets.pos
-			mag_target_scale = targets.scale
-			mag_target_rot = targets.rot
-
+		# СВОБОДНЫЙ ПОЛЕТ
 		is_preview_snapped = false
 		_snapped_root_cell = null
 		target_preview_pos = hotspot - half_size
@@ -582,10 +586,14 @@ func _update_drag_preview_pos(mouse_pos: Vector2) -> void:
 func hide_external_drag_preview() -> void:
 	if drag_preview_container:
 		drag_preview_container.hide()
-		drag_preview_container.scale = Vector2.ONE # Сбрасываем масштаб
+		drag_preview_container.scale = Vector2.ONE
 	_update_grid_visuals()
 	is_preview_snapped = false
 	_snapped_root_cell = null
+	is_backpack_frozen = false
+	mag_frozen_pos = bg_base_pos
+	mag_frozen_scale = bg_base_scale
+	mag_frozen_rot = bg_base_rot
 
 # ==========================================================
 # --- ОСТАЛЬНАЯ ЛОГИКА ---
