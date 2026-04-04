@@ -122,8 +122,19 @@ func _process(delta: float) -> void:
 			target_bg_pos = targets.pos
 			target_bg_scale = targets.scale
 			target_bg_rot = targets.rot
+
+	elif ItemManager.is_edit_mode:
+		# Режим редактирования: рюкзак плавно взлетает и фиксируется без слежения за пальцем
+		target_bg_pos = bg_base_pos + Vector2(0.0, -magnet_max_offset)
+		target_bg_scale = bg_base_scale * magnet_scale_bump
+		target_bg_rot = bg_base_rot
+
+		is_preview_snapped = false
+		_snapped_root_cell = null
+		is_backpack_frozen = false
+
 	else:
-		# СБРОС
+		# СБРОС (рюкзак возвращается в исходное положение)
 		is_preview_snapped = false
 		_snapped_root_cell = null
 		is_backpack_frozen = false
@@ -135,6 +146,10 @@ func _process(delta: float) -> void:
 
 	if drag_preview_container.visible:
 		drag_preview_container.rotation_degrees = backpack_bg.rotation_degrees
+
+	if edit_menu and edit_menu.visible:
+		var current_bg_offset: Vector2 = backpack_bg.position - bg_base_pos
+		edit_menu.position = default_edit_menu_pos + current_bg_offset
 
 # ==========================================================
 # --- АЛГОРИТМ АВТО-СБОРКИ (BIN PACKING) ---
