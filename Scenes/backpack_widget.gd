@@ -93,10 +93,11 @@ func _process(delta: float) -> void:
 	var target_bg_rot = bg_base_rot
 
 	if ItemManager.is_dragging_item and not is_dragging_internal and drag_preview_container.visible:
-		var hotspot = get_global_mouse_position() + drag_pointer_offset
-		# Берем границы рюкзака и чуть расширяем их (на 20px) для мягкости входа
 		var bg_rect = backpack_bg.get_global_rect().grow(20.0)
-		var is_over_bg = bg_rect.has_point(hotspot)
+
+		# ПРОВЕРКА ПО РЕАЛЬНОМУ ПАЛЬЦУ, А НЕ ПО ПРИЦЕЛУ
+		var real_mouse_pos = get_global_mouse_position()
+		var is_over_bg = bg_rect.has_point(real_mouse_pos)
 
 		if is_over_bg:
 			if not is_backpack_frozen:

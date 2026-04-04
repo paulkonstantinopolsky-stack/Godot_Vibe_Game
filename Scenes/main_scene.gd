@@ -355,8 +355,17 @@ func start_game_flow():
 func _run_fly_icon_return_after_focus(fly_icon: TextureRect, drag_node: Node3D) -> void:
 	var cam = get_viewport().get_camera_3d()
 	var target_pos = drag_start_pos - fly_icon.pivot_offset
+
 	if cam and drag_node and is_instance_valid(drag_node):
+		# ПРОВЕРКА НА ПОЗИЦИЮ ЗА КАМЕРОЙ
+		if cam.is_position_behind(drag_node.global_position):
+			fly_icon.queue_free()
+			if drag_node.has_method("show_item"): drag_node.show_item()
+			else: drag_node.show()
+			return
+
 		target_pos = cam.unproject_position(drag_node.global_position) - fly_icon.pivot_offset
+
 	var local_inner_tween = create_tween().set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
 	local_inner_tween.tween_property(fly_icon, "global_position", target_pos, 0.3)
 	local_inner_tween.tween_callback(func():

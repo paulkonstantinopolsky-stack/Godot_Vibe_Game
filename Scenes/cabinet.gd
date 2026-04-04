@@ -92,7 +92,7 @@ func _process(delta: float) -> void:
 		return
 
 	if abs(angular_velocity) > snap_threshold:
-		current_rotation_y += angular_velocity
+		current_rotation_y += angular_velocity * (delta * 60.0) # Компенсация под 60 FPS
 		rotation_degrees.y = current_rotation_y
 		angular_velocity = lerpf(angular_velocity, 0.0, friction * delta)
 		_check_haptic_click()
@@ -221,6 +221,7 @@ func focus_item_face_to_camera(item_node: Node3D, duration: float = 0.35, force:
 
 func build_cabinet_tornado() -> void:
 	for child in get_children():
+		child.hide() # Спрятать перед удалением
 		child.queue_free()
 		
 	show()
