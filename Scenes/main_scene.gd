@@ -191,15 +191,15 @@ func _on_autofill_pressed():
 
 		ItemManager.mark_item_as_found(id)
 
-		var tex_path = ItemManager.items_db[id]["texture"]
-		var fly_icon = TextureRect.new()
-		fly_icon.texture = load(tex_path); fly_icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-		fly_icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-		fly_icon.size = target_cell.size; fly_icon.pivot_offset = fly_icon.size / 2.0
-		fly_icon.z_index = 100; fly_icon.modulate.a = 0.0 
-		$UILayer.add_child(fly_icon)
+		var target_pos = target_cell.global_position
+		var target_rot = target_cell.get_meta("rot_deg", 0)
+		var target_shape = target_cell.get_meta("current_shape")
 
-		var target_pos = target_cell.global_position; var target_rot = target_cell.get_meta("rot_deg", 0)
+		# Генерируем полноценный паззл через рюкзак
+		var fly_icon = backpack_widget.create_standalone_puzzle_visual(id, target_shape, target_rot)
+		fly_icon.z_index = 100
+		fly_icon.modulate.a = 0.0
+		$UILayer.add_child(fly_icon)
 
 		var start_tw = create_tween()
 		start_tw.tween_interval(i * 0.15)
@@ -209,15 +209,28 @@ func _on_autofill_pressed():
 				if cab_node.has_method("hide_item"): cab_node.hide_item()
 				else: cab_node.hide()
 				if cam: start_pos = cam.unproject_position(cab_node.global_position)
-			
-			fly_icon.global_position = start_pos - (fly_icon.size / 2.0); fly_icon.modulate.a = 1.0
+
+			fly_icon.global_position = start_pos - (fly_icon.size / 2.0)
+			fly_icon.scale = Vector2(0.2, 0.2) # Вылетает маленьким из шкафа
+			fly_icon.modulate.a = 1.0
+
 			var anim_tw = create_tween().set_parallel(true).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
 			anim_tw.tween_property(fly_icon, "global_position", target_pos, 0.4)
-			anim_tw.tween_property(fly_icon, "rotation_degrees", target_rot, 0.4)
+			anim_tw.tween_property(fly_icon, "scale", Vector2.ONE, 0.4)
+			# Вращение не нужно, так как форма паззла уже повернута правильно внутри контейнера
+
 			anim_tw.chain().tween_callback(func():
 				fly_icon.queue_free()
-				if is_instance_valid(target_cell) and target_cell.has_node("ItemIcon"):
-					target_cell.get_node("ItemIcon").show()
+				if is_instance_valid(target_cell):
+					# Снимаем флаг ожидания
+					target_cell.set_meta("hide_bg_until_land", false)
+
+					if target_cell.has_node("ItemIcon"):
+						target_cell.get_node("ItemIcon").show()
+
+					# ВАЖНО: Вызываем обновление визуала рюкзака, чтобы вернуть фон
+					if backpack_widget and backpack_widget.has_method("_update_grid_visuals"):
+						backpack_widget._update_grid_visuals()
 			)
 		)
 	var added_cinematics = cinematic_queue - queue_before

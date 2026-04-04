@@ -211,6 +211,8 @@ func auto_fill_and_optimize(required_ids: Array) -> Array:
 						successfully_added_new.append({"id": item_id, "cell": cell})
 						# ВАЖНО: Прячем иконку! Она включится, когда долетит анимация из MainScene
 						cell.get_node("ItemIcon").hide()
+						# Флаг, чтобы не рисовать коричневый фон, пока анимация в полете
+						cell.set_meta("hide_bg_until_land", true)
 					else:
 						# Восстанавливаем ссылку на 3D-узел шкафа для существующих предметов
 						if saved_drag_nodes.has(item_id):
@@ -232,39 +234,37 @@ func auto_fill_and_optimize(required_ids: Array) -> Array:
 		return []
 
 	if successfully_added_new.size() > 0 or existing_items.size() > 0:
+		# ВАЖНО: Принудительно обновляем сетку ПОСЛЕ того, как всем новым предметам
+		# были розданы флаги 'hide_bg_until_land', чтобы избежать "невидимых" ячеек
+		_update_grid_visuals()
 		_play_autofill_cascade_animation()
 
 	return successfully_added_new
 
 
 func _play_autofill_cascade_animation() -> void:
-	var target_cells: Array = []
-	for cell in grid.get_children():
-		if cell.has_node("ItemIcon"):
-			target_cells.append(cell)
+	var cell_tween: Tween = create_tween()
+	cell_tween.set_parallel(true)
 
-	backpack_bg.pivot_offset = backpack_bg.size / 2.0
-	backpack_bg.scale = Vector2.ZERO
-
-	for cell in target_cells:
-		cell.pivot_offset = cell.size / 2.0
-		cell.scale = Vector2.ZERO
-		cell.show()
-
+	var delay: float = 0.0
 	const DURATION: float = 0.3
 	const DELAY_STEP: float = 0.05
 
-	var bg_tween: Tween = create_tween()
-	bg_tween.tween_property(backpack_bg, "scale", Vector2.ONE, DURATION)\
-		.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	for cell in grid.get_children():
+		var icon = cell.get_node_or_null("ItemIcon")
 
-	var cell_tween: Tween = create_tween()
-	cell_tween.set_parallel(true)
-	for i in range(target_cells.size()):
-		var c: Control = target_cells[i]
-		cell_tween.tween_property(c, "scale", Vector2.ONE, DURATION)\
-			.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)\
-			.set_delay(float(i) * DELAY_STEP)
+		# Анимируем только те иконки, которые сейчас ВИДИМЫ (старые предметы, которые перемешались).
+		# Новые предметы были скрыты (hide) в auto_fill_and_optimize, их покажет main_scene когда они долетят.
+		if icon and icon.visible and cell.get_meta("occupied_by_id", -1) != -1:
+			# Убеждаемся, что пивот по центру
+			icon.pivot_offset = icon.size / 2.0
+			icon.scale = Vector2.ZERO
+
+			cell_tween.tween_property(icon, "scale", Vector2.ONE, DURATION)\
+				.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)\
+				.set_delay(delay)
+
+			delay += DELAY_STEP
 
 func _clear_entire_grid():
 	var roots = []
@@ -380,6 +380,9 @@ func _get_merged_stylebox(shape: Array, offset: Vector2, is_focused: bool, is_pr
 	return style
 
 func _draw_merged_item(_item_id: int, start_cell: Control, shape: Array, is_focused: bool):
+	if start_cell.get_meta("hide_bg_until_land", false):
+		return
+
 	for offset in shape:
 		var target_coords = _get_cell_coords(start_cell) + Vector2i(offset.x, offset.y)
 		var target_cell = _get_cell_by_coords(target_coords)
@@ -414,9 +417,10 @@ func _on_grid_draw():
 		var item_id = cell.get_meta("occupied_by_id", -1)
 		if item_id != -1:
 			var root_cell = cell.get_meta("root_cell")
-			if not processed_roots.has(root_cell):
+			if root_cell and not processed_roots.has(root_cell):
 				if is_dragging_internal and root_cell == active_cell: continue
 				processed_roots.append(root_cell)
+
 				var shape = root_cell.get_meta("current_shape")
 				var is_focused = (root_cell == active_cell and ItemManager.is_edit_mode)
 				_draw_merged_item(item_id, root_cell, shape, is_focused)
@@ -428,11 +432,24 @@ func _update_grid_visuals():
 		if not border: continue
 
 		var is_occupied = cell.get_meta("occupied_by_id", -1) != -1
-		if is_occupied and is_dragging_internal and cell.get_meta("root_cell") == active_cell:
-			is_occupied = false
+		var root_cell = cell.get_meta("root_cell")
 
-		if is_occupied: border.hide() 
-		else: border.show(); border.set_state(1 if ItemManager.is_edit_mode else 0)
+		# Если предмет летит, ячейка считает себя визуально "пустой" для рамки
+		var is_waiting = is_occupied and root_cell and root_cell.get_meta("hide_bg_until_land", false)
+
+		var show_border_as_empty = is_waiting
+		if is_occupied and is_dragging_internal and root_cell == active_cell:
+			show_border_as_empty = true
+
+		if is_occupied and not show_border_as_empty:
+			border.hide()
+		else:
+			border.show()
+			# Возвращаем стандартное поведение без пунктиров
+			border.set_state(1 if ItemManager.is_edit_mode else 0)
+			# Форсируем альфу, чтобы рамка появлялась мгновенно, не дожидаясь Tween-анимации
+			border.alpha_default = 1.0
+
 	grid.queue_redraw()
 
 # ==========================================================
@@ -1123,3 +1140,54 @@ func start_appear_animation():
 		bg_base_rot = backpack_bg.rotation_degrees
 		is_magnet_ready = true # Включаем магнит только когда рюкзак встал на место
 	)
+
+# ==========================================================
+# --- ФАБРИКА ОДИНОЧНОГО ПАЗЗЛА (ДЛЯ АНИМАЦИИ ПОЛЕТА) ---
+# ==========================================================
+func create_standalone_puzzle_visual(item_id: int, shape: Array, rot_deg: int) -> Control:
+	var container = Control.new()
+	container.mouse_filter = Control.MOUSE_FILTER_IGNORE
+
+	if grid.get_child_count() == 0: return container
+	var c_size = grid.get_child(0).size
+	var spacing = Vector2(max(0, grid.get_theme_constant("h_separation")), max(0, grid.get_theme_constant("v_separation")))
+
+	# 1. Строим подложку из Panel
+	for offset in shape:
+		var panel = Panel.new()
+		# Используем стандартный стиль (false), чтобы летел обычный коричневый паззл
+		var style = _get_merged_stylebox(shape, offset, false, false)
+		panel.add_theme_stylebox_override("panel", style)
+
+		var raw_pos = Vector2(offset.x * (c_size.x + spacing.x), offset.y * (c_size.y + spacing.y))
+		var p_pos = raw_pos.round()
+		var p_size = c_size.round()
+		var overlap = 2.0
+
+		if shape.has(offset + Vector2(1, 0)):
+			var next_raw_pos = Vector2((offset.x + 1) * (c_size.x + spacing.x), offset.y * (c_size.y + spacing.y))
+			p_size.x = (next_raw_pos.round().x - p_pos.x) + overlap
+		if shape.has(offset + Vector2(0, 1)):
+			var next_raw_pos = Vector2(offset.x * (c_size.x + spacing.x), (offset.y + 1) * (c_size.y + spacing.y))
+			p_size.y = (next_raw_pos.round().y - p_pos.y) + overlap
+
+		panel.position = p_pos
+		panel.size = p_size
+		container.add_child(panel)
+
+	# 2. Добавляем иконку
+	var icon = TextureRect.new()
+	icon.texture = load(ItemManager.items_db[item_id]["texture"])
+	container.add_child(icon)
+	_align_icon_in_bbox(icon, item_id, shape, rot_deg)
+
+	# 3. Вычисляем общий размер контейнера для правильного pivot_offset
+	var max_x = 0.0
+	var max_y = 0.0
+	for p in shape:
+		if p.x > max_x: max_x = p.x
+		if p.y > max_y: max_y = p.y
+	container.size = Vector2((max_x + 1.0) * c_size.x + max_x * spacing.x, (max_y + 1.0) * c_size.y + max_y * spacing.y)
+	container.pivot_offset = container.size / 2.0
+
+	return container
