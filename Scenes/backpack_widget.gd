@@ -154,11 +154,20 @@ func _process(delta: float) -> void:
 # ==========================================================
 # --- АЛГОРИТМ АВТО-СБОРКИ (BIN PACKING) ---
 # ==========================================================
-func auto_fill_and_optimize(required_ids: Array) -> Array:
+func auto_fill_and_optimize(new_items_data: Array) -> Array:
 	_close_edit_mode()
 
 	var existing_items = []
+	var wrong_items_to_return = []
 	var processed_roots = []
+
+	# 1. Считаем лимиты: сколько ПРАВИЛЬНЫХ предметов уже лежит в рюкзаке
+	var valid_counts = {}
+	for task in ItemManager.current_order:
+		if task["found"]:
+			valid_counts[task["id"]] = valid_counts.get(task["id"], 0) + 1
+
+	# 2. Ревизия рюкзака: отделяем правильные предметы от мусора
 	for cell in grid.get_children():
 		if not cell.has_node("ItemIcon"): continue
 		var item_id = cell.get_meta("occupied_by_id", -1)
@@ -166,36 +175,56 @@ func auto_fill_and_optimize(required_ids: Array) -> Array:
 			var root = cell.get_meta("root_cell")
 			if not processed_roots.has(root):
 				processed_roots.append(root)
-				existing_items.append({
-					"id": item_id,
-					"old_root": root,
-					"old_shape": root.get_meta("current_shape"),
-					"old_rot": root.get_meta("rot_deg", 0)
-				})
 
-	# Сохраняем source_drag_node для существующих предметов до очистки сетки
+				var is_correct = false
+				if valid_counts.get(item_id, 0) > 0:
+					is_correct = true
+					valid_counts[item_id] -= 1 # Списываем со счета легальных
+
+				if is_correct:
+					existing_items.append({
+						"id": item_id,
+						"old_root": root,
+						"old_shape": root.get_meta("current_shape"),
+						"old_rot": root.get_meta("rot_deg", 0)
+					})
+				else:
+					# Этот предмет лишний или вообще не из заказа!
+					wrong_items_to_return.append({
+						"id": item_id,
+						"pos": root.global_position + (root.size / 2.0),
+						"drag_node": root.get_meta("source_drag_node") if root.has_meta("source_drag_node") else null
+					})
+
 	var saved_drag_nodes: Dictionary = {}
 	for item in existing_items:
 		if item["old_root"].has_meta("source_drag_node"):
 			saved_drag_nodes[item["id"]] = item["old_root"].get_meta("source_drag_node")
 
 	var to_pack = []
-	for item in existing_items: to_pack.append({"id": item["id"], "is_new": false})
-	for id in required_ids: to_pack.append({"id": id, "is_new": true})
+	for item in existing_items:
+		to_pack.append({"id": item["id"], "is_new": false, "shape": item["old_shape"]})
+	for data in new_items_data:
+		to_pack.append({"id": data["id"], "is_new": true, "shape": data["shape"], "cab_node": data["cab_node"]})
 
 	to_pack.sort_custom(func(a, b):
-		return ItemManager.items_db[a.id]["shape"].size() > ItemManager.items_db[b.id]["shape"].size()
+		return a["shape"].size() > b["shape"].size()
 	)
 
 	_clear_entire_grid()
+
+	# 3. АНИМАЦИЯ ВОЗВРАТА: Вышвыриваем мусор обратно в шкаф
+	for wrong_item in wrong_items_to_return:
+		if get_tree().current_scene.has_method("fly_back_to_cabinet"):
+			get_tree().current_scene.fly_back_to_cabinet(wrong_item["id"], wrong_item["pos"], wrong_item["drag_node"])
 
 	var successfully_added_new = []
 	var packing_failed = false
 
 	for pack_item in to_pack:
 		var placed = false
-		var item_id = pack_item.id
-		var base_shape = ItemManager.items_db[item_id]["shape"]
+		var item_id = pack_item["id"]
+		var base_shape = pack_item["shape"]
 
 		for r in range(4):
 			if placed: break
@@ -206,30 +235,31 @@ func auto_fill_and_optimize(required_ids: Array) -> Array:
 				if _can_place_shape(cell, test_shape):
 					_place_item_in_grid(cell, item_id, test_shape, r * 90)
 					placed = true
-					
-					if pack_item.is_new:
-						successfully_added_new.append({"id": item_id, "cell": cell})
-						# ВАЖНО: Прячем иконку! Она включится, когда долетит анимация из MainScene
+
+					if pack_item["is_new"]:
+						successfully_added_new.append({
+							"id": item_id,
+							"cell": cell,
+							"cab_node": pack_item.get("cab_node")
+						})
 						cell.get_node("ItemIcon").hide()
-						# Флаг, чтобы не рисовать коричневый фон, пока анимация в полете
 						cell.set_meta("hide_bg_until_land", true)
 					else:
-						# Восстанавливаем ссылку на 3D-узел шкафа для существующих предметов
 						if saved_drag_nodes.has(item_id):
 							cell.set_meta("source_drag_node", saved_drag_nodes[item_id])
 					break
 
 		if not placed:
-			if not pack_item.is_new: 
-				packing_failed = true 
-				break 
+			if not pack_item["is_new"]:
+				packing_failed = true
+				break
 			else:
-				continue 
+				continue
 
 	if packing_failed:
 		_clear_entire_grid()
 		for item in existing_items:
-			_place_item_in_grid(item.old_root, item.id, item.old_shape, item.old_rot)
+			_place_item_in_grid(item["old_root"], item["id"], item["old_shape"], item["old_rot"])
 		print("Авто-сборка: Не хватает места для перетасовки!")
 		return []
 

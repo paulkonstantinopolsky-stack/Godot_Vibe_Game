@@ -149,28 +149,45 @@ func _on_autofill_pressed():
 	if not is_game_started or not backpack_widget or is_cinematic_playing or is_autofill_animating: return
 	if ItemManager.is_dragging_item or backpack_widget.is_dragging_internal: return
 
-	var required_ids = []
+	# СОБИРАЕМ РЕАЛЬНЫЕ ДАННЫЕ ИЗ ШКАФА
+	var required_data = []
+	var used_cab_nodes = []
 	for task in ItemManager.current_order:
-		if not task["found"]: required_ids.append(task["id"])
+		if not task["found"]:
+			var id = task["id"]
+			var cab_node = _find_cabinet_item_node(cabinet, id, used_cab_nodes)
+			var actual_shape = []
 
-	if required_ids.size() == 0: return
-	var placements = backpack_widget.auto_fill_and_optimize(required_ids)
-	if placements.size() == 0: return 
-	
+			# Берем сгенерированную форму прямо из 3D-предмета
+			if cab_node and cab_node.has_meta("puzzle_shape"):
+				actual_shape = cab_node.get_meta("puzzle_shape")
+				used_cab_nodes.append(cab_node)
+			else:
+				actual_shape = ItemManager.items_db[id].get("shape", [Vector2.ZERO])
+
+			required_data.append({
+				"id": id,
+				"shape": actual_shape,
+				"cab_node": cab_node
+			})
+
+	if required_data.size() == 0: return
+
+	# ПЕРЕДАЕМ РЕАЛЬНЫЕ ДАННЫЕ В РЮКЗАК
+	var placements = backpack_widget.auto_fill_and_optimize(required_data)
+	if placements.size() == 0: return
+
 	is_autofill_animating = true
 
 	var fly_data_array = []
-	var used_cab_nodes = []
 	for place_data in placements:
-		var id = place_data["id"]
-		var cab_node = _find_cabinet_item_node(cabinet, id, used_cab_nodes)
-		if cab_node:
-			used_cab_nodes.append(cab_node)
+		var cab_node = place_data["cab_node"]
 		fly_data_array.append({
-			"id": id, "cell": place_data["cell"], "cab_node": cab_node,
+			"id": place_data["id"],
+			"cell": place_data["cell"],
+			"cab_node": cab_node,
 			"start_y": cab_node.global_position.y if cab_node else -9999.0
 		})
-		# Сохраняем ссылку на 3D-узел чтобы fly_back_to_cabinet работал корректно
 		if cab_node and is_instance_valid(cab_node) and is_instance_valid(place_data["cell"]):
 			place_data["cell"].set_meta("source_drag_node", cab_node)
 
