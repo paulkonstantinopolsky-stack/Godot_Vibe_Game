@@ -4,6 +4,7 @@ extends Control
 
 @onready var items_container = $ItemsContainer
 @onready var small_envelope = $SmallEnvelope
+@onready var combo_widget = $ComboWidget
 
 const ITEM_SIZE = 120.0
 const SPACING = 30.0
@@ -51,4 +52,9 @@ func _on_item_found(id: int):
 		if int(entry.item_id) == int(id) and not entry.get_meta("is_flipped", false):
 			entry.flip_to_front()
 			entry.set_meta("is_flipped", true)
+
+			if not ItemManager.combo_failed:
+				if combo_widget and combo_widget.has_method("show_success"):
+					var total: int = ItemManager.current_order.size()
+					combo_widget.show_success(ItemManager.combo_score, total)
 			break

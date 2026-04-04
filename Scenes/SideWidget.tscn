@@ -2,14 +2,18 @@
 
 [ext_resource type="Script" uid="uid://vbup7naatafb" path="res://Scenes/side_widget.gd" id="1_dirqp"]
 [ext_resource type="Texture2D" uid="uid://qlxf7w5jny2o" path="res://Assets/2D/Small_Envelope.png" id="1_hrqo8"]
+[ext_resource type="FontFile" uid="uid://crl2jbvqyt7jm" path="res://Fonts/Comfortaa-Bold.ttf" id="font_combo"]
+[ext_resource type="Texture2D" uid="uid://drw73gkwqbmxh" path="res://Assets/2D/plate_purple.png" id="plate_purple_tex"]
+[ext_resource type="Script" uid="uid://b10rk4a2v3x3h" path="res://Scenes/combo_widget.gd" id="script_combo"]
+[ext_resource type="Texture2D" uid="uid://biwhga02ggvpv" path="res://Assets/2D/combo_widget.png" id="tex_combo"]
 
-[node name="SideWidget" type="Control" unique_id=2032529895]
-custom_minimum_size = Vector2(130, 876)
+[node name="SideWidget" type="Control" unique_id=76535946]
+custom_minimum_size = Vector2(300, 1016)
 layout_mode = 3
 anchors_preset = 0
 script = ExtResource("1_dirqp")
 
-[node name="SmallEnvelope" type="TextureRect" parent="." unique_id=1579572616]
+[node name="SmallEnvelope" type="TextureRect" parent="." unique_id=637990623]
 custom_minimum_size = Vector2(130, 136)
 layout_mode = 1
 offset_top = 740.0
@@ -17,10 +21,56 @@ offset_right = 130.0
 offset_bottom = 876.0
 texture = ExtResource("1_hrqo8")
 
-[node name="ItemsContainer" type="Control" parent="." unique_id=1864778913]
+[node name="ItemsContainer" type="Control" parent="." unique_id=495166018]
 custom_minimum_size = Vector2(120, 720)
 layout_mode = 1
 anchors_preset = 0
 offset_left = 5.0
 offset_right = 125.0
 offset_bottom = 720.0
+
+[node name="ComboWidget" type="Control" parent="." unique_id=651346344]
+layout_mode = 1
+anchors_preset = 0
+offset_top = 740.0
+offset_right = 360.0
+offset_bottom = 876.0
+mouse_filter = 2
+script = ExtResource("script_combo")
+
+[node name="ComboPlate" type="TextureRect" parent="ComboWidget" unique_id=1636805062]
+layout_mode = 0
+offset_left = 75.0
+offset_top = 22.0
+offset_right = 373.0
+offset_bottom = 125.0
+mouse_filter = 2
+texture = ExtResource("plate_purple_tex")
+
+[node name="ComboText" type="Label" parent="ComboWidget/ComboPlate" unique_id=927199015]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 95.0
+offset_top = 6.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_colors/font_color = Color(0.96862745, 0.87058824, 0.46666667, 1)
+theme_override_fonts/font = ExtResource("font_combo")
+theme_override_font_sizes/font_size = 56
+text = "0/5"
+vertical_alignment = 1
+
+[node name="ComboIcon" type="TextureRect" parent="ComboWidget" unique_id=1675447625]
+custom_minimum_size = Vector2(154, 154)
+layout_mode = 0
+offset_left = -12.0
+offset_top = -4.0
+offset_right = 142.0
+offset_bottom = 150.0
+pivot_offset = Vector2(65, 65)
+mouse_filter = 2
+texture = ExtResource("tex_combo")
+expand_mode = 1
+stretch_mode = 5

@@ -81,15 +81,29 @@ func _ready():
 	if backpack_widget: backpack_widget.hide()
 	if drag_preview: drag_preview.hide()
 	if cabinet: cabinet.hide()
-		
-	ItemManager.item_pressed.connect(_on_item_pressed)
-	
-	# Замыкаем цепь комбо-системы
-	if not ItemManager.bonus_cell_unlocked.is_connected(_on_bonus_cell_unlocked):
-		ItemManager.bonus_cell_unlocked.connect(_on_bonus_cell_unlocked)
 
-func _on_bonus_cell_unlocked():
-	cinematic_queue += 1
+	ItemManager.item_pressed.connect(_on_item_pressed)
+
+	ItemManager.perfect_clear_achieved.connect(_on_perfect_clear)
+	ItemManager.level_completed.connect(func(): print("Level finished!"))
+	ItemManager.combo_broken.connect(_on_combo_broken)
+
+func _on_combo_broken() -> void:
+	if side_widget and side_widget.has_node("ComboWidget"):
+		var cw = side_widget.get_node("ComboWidget")
+		if cw.has_method("show_fail"):
+			cw.show_fail()
+
+func _on_perfect_clear() -> void:
+	var popup_script: GDScript = load("res://Scenes/perfect_popup.gd") as GDScript
+	var popup: Control = popup_script.new() as Control
+	popup.z_index = 400
+	$UILayer.add_child(popup)
+	popup.set_anchors_preset(Control.PRESET_FULL_RECT)
+	popup.play_animation(func():
+		cinematic_queue = 3
+		_play_next_cinematic()
+	)
 
 func _process(delta):
 	if is_timer_active and time_left > 0:
@@ -346,9 +360,9 @@ func start_game_flow():
 	outro.tween_property(ready_button, "modulate:a", 0.0, let_outro_fade)
 	
 	outro.chain().tween_callback(ready_button.hide)
-	outro.chain().tween_callback(func(): 
+	outro.chain().tween_callback(func():
 		if side_widget: side_widget.start_appear_animation()
-		if backpack_widget: backpack_widget.start_appear_animation() 
+		if backpack_widget: backpack_widget.start_appear_animation()
 		if autofill_button: autofill_button.modulate.a = 1.0; autofill_button.show()
 	)
 

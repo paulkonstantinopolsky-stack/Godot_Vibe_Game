@@ -6,8 +6,10 @@ var current_order = []
 @warning_ignore("unused_signal")
 signal item_found(id)
 @warning_ignore("unused_signal")
-signal item_pressed(id: int, tex_path: String, node: Node3D) 
-signal bonus_cell_unlocked()
+signal item_pressed(id: int, tex_path: String, node: Node3D)
+signal level_completed()
+signal perfect_clear_achieved()
+signal combo_broken()
 
 var is_dragging_item: bool = false 
 var is_edit_mode: bool = false
@@ -75,19 +77,19 @@ func load_items_from_data():
 	print("БАЗА ПРЕДМЕТОВ ЗАГРУЖЕНА: ", items_db.size(), " объектов")
 
 func mark_item_as_found(item_id: int):
-	if item_id == -1: return 
-	
+	if item_id == -1: return
+
 	var is_part_of_order = false
-	var was_just_found = false
-	
+
 	for item in current_order:
 		if item["id"] == item_id and not item["found"]:
 			is_part_of_order = true
 			item["found"] = true
-			was_just_found = true
+			if not combo_failed:
+				combo_score += 1
 			item_found.emit(item_id)
 			break
-	
+
 	if not is_part_of_order:
 		var is_already_packed = false
 		for item in current_order:
@@ -95,12 +97,20 @@ func mark_item_as_found(item_id: int):
 				is_already_packed = true
 				break
 		if not is_already_packed:
-			combo_failed = true
-	else:
-		if was_just_found and not combo_failed:
-			combo_score += 1
-			if combo_score == 2 or combo_score == 4 or combo_score == 5:
-				bonus_cell_unlocked.emit()
+			if not combo_failed:
+				combo_failed = true
+				combo_broken.emit()
+
+	var all_found = true
+	for item in current_order:
+		if not item["found"]:
+			all_found = false
+			break
+
+	if all_found:
+		level_completed.emit()
+		if not combo_failed:
+			perfect_clear_achieved.emit()
 
 func generate_new_order():
 	current_order.clear()
@@ -222,4 +232,7 @@ func unmark_item_as_found(item_id: int):
 		if item["id"] == item_id and item["found"]:
 			item["found"] = false
 			combo_score = max(0, combo_score - 1)
+			if not combo_failed:
+				combo_failed = true
+				combo_broken.emit()
 			break
