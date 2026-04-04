@@ -67,6 +67,8 @@ var coin_seq_tween: Tween
 var bonus_post_open_delay_multiplier: float = 1.0
 var bonus_fixed_post_open_delay: float = -1.0
 
+var _is_first_bonus_reveal: bool = true
+
 func set_bonus_reveal_speed_multiplier(mult: float) -> void:
 	bonus_reveal_speed_multiplier = max(mult, 0.01)
 
@@ -228,7 +230,8 @@ func build_cabinet_tornado() -> void:
 	can_rotate = false
 	active_red_cells.clear()
 	unlocked_coin_cols.clear()
-	
+	_is_first_bonus_reveal = true
+
 	var spawn_list = []
 	for order_item in ItemManager.current_order:
 		spawn_list.append(order_item["id"])
@@ -342,16 +345,25 @@ func reveal_next_bonus_cell(callback: Callable):
 	var final_angle_rad: float = rotation.y + diff
 	var final_deg: float = rad_to_deg(final_angle_rad)
 
-	var reveal_duration = 1.2 / bonus_reveal_speed_multiplier
-	var post_open_delay = 1.3 / (bonus_reveal_speed_multiplier * bonus_post_open_delay_multiplier)
+	var extra_spin: float = 0.0
+	if _is_first_bonus_reveal:
+		extra_spin = 360.0 if diff >= 0 else -360.0
+		_is_first_bonus_reveal = false
+
+	var juicy_final_deg: float = final_deg + extra_spin
+
+	var reveal_duration: float = 1.0 / bonus_reveal_speed_multiplier
+	var post_open_delay: float = 0.6 / (bonus_reveal_speed_multiplier * bonus_post_open_delay_multiplier)
 	if bonus_fixed_post_open_delay >= 0.0:
 		post_open_delay = bonus_fixed_post_open_delay
-	var tw = create_tween().set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
-	tw.tween_property(self, "rotation_degrees:y", final_deg, reveal_duration)
+
+	var tw := create_tween().set_trans(Tween.TRANS_QUART).set_ease(Tween.EASE_IN_OUT)
+	tw.tween_property(self, "rotation_degrees:y", juicy_final_deg, reveal_duration)
 	tw.tween_callback(func():
 		current_rotation_y = rotation_degrees.y
-		# Метаданные и регистрация — вне проверки open_doors,
-		# чтобы монетка всегда могла найти свою колонку.
+		rotation_degrees.y = fmod(rotation_degrees.y, 360.0)
+		current_rotation_y = rotation_degrees.y
+
 		if is_instance_valid(cell):
 			cell.set_meta("cabinet_col", col)
 			_register_coin_col(col)

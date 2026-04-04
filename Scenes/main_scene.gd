@@ -95,8 +95,11 @@ func _on_combo_broken() -> void:
 			cw.show_fail()
 
 func _on_perfect_clear() -> void:
-	var popup_script: GDScript = load("res://Scenes/perfect_popup.gd") as GDScript
-	var popup: Control = popup_script.new() as Control
+	if is_autofill_animating:
+		while is_autofill_animating:
+			await get_tree().process_frame
+
+	var popup: Control = load("res://Scenes/perfect_popup.gd").new() as Control
 	popup.z_index = 400
 	$UILayer.add_child(popup)
 	popup.set_anchors_preset(Control.PRESET_FULL_RECT)
