@@ -1,0 +1,42 @@
+[gd_scene format=3 uid="uid://x27xith74xhd"]
+
+[ext_resource type="Texture2D" uid="uid://q2vpmgtwyomj" path="res://Assets/Backpack_animation/B1.png" id="1_70f0a"]
+[ext_resource type="Script" uid="uid://dp65ba5ewwijg" path="res://Scenes/backpack_closing_sequence.gd" id="1_whixg"]
+
+[node name="BackpackClosingSequence" type="Control" unique_id=1895647749]
+custom_minimum_size = Vector2(972, 1250)
+layout_mode = 3
+anchor_right = 0.90000004
+anchor_bottom = 0.521
+offset_right = -6.1035156e-05
+offset_bottom = -0.4000244
+grow_horizontal = 2
+grow_vertical = 2
+size_flags_horizontal = 4
+size_flags_vertical = 4
+script = ExtResource("1_whixg")
+
+[node name="FrameDisplay" type="TextureRect" parent="." unique_id=1452396379]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+texture = ExtResource("1_70f0a")
+expand_mode = 1
+stretch_mode = 5
+
+[node name="DragHandle" type="Control" parent="." unique_id=1642549244]
+layout_mode = 1
+anchor_left = 0.5
+anchor_top = 0.1548
+anchor_right = 0.5
+anchor_bottom = 0.1548
+offset_left = -134.0
+offset_top = -193.5
+offset_right = 134.0
+offset_bottom = 193.5
+grow_horizontal = 2
+grow_vertical = 2
+metadata/_edit_use_anchors_ = true

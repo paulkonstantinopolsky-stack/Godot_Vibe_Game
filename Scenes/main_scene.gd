@@ -82,11 +82,18 @@ func _ready():
 	if drag_preview: drag_preview.hide()
 	if cabinet: cabinet.hide()
 
+	if cabinet:
+		cabinet.all_rewards_collected_visually.connect(_on_all_rewards_collected_visually)
+
 	ItemManager.item_pressed.connect(_on_item_pressed)
 
 	ItemManager.perfect_clear_achieved.connect(_on_perfect_clear)
 	ItemManager.level_completed.connect(func(): print("Level finished!"))
 	ItemManager.combo_broken.connect(_on_combo_broken)
+
+func _on_all_rewards_collected_visually() -> void:
+	if backpack_widget and backpack_widget.has_method("start_order_completed_sequence"):
+		backpack_widget.start_order_completed_sequence()
 
 func _on_combo_broken() -> void:
 	if side_widget and side_widget.has_node("ComboWidget"):
@@ -107,6 +114,10 @@ func _on_perfect_clear() -> void:
 		cinematic_queue = 3
 		_play_next_cinematic()
 	)
+
+	# Нет шкафа — сигнала all_rewards_collected_visually не будет; взлёт через 1с после появления Perfect
+	if cabinet == null:
+		get_tree().create_timer(1.0).timeout.connect(_on_all_rewards_collected_visually)
 
 func _process(delta):
 	if is_timer_active and time_left > 0:
@@ -422,10 +433,14 @@ func _run_fly_icon_return_after_focus(fly_icon: TextureRect, drag_node: Node3D) 
 			else: drag_node.show()
 	)
 
-func fly_back_to_cabinet(item_id: int, start_pos: Vector2, drag_node: Node3D):
+func fly_back_to_cabinet(item_id: int, start_pos: Vector2, drag_node: Node3D, skip_unmark: bool = false):
 	const FOCUS_DURATION := 0.2
 	if item_id == -1: ItemManager.is_dragging_item = false; return
-	ItemManager.unmark_item_as_found(item_id)
+
+	# Пропускаем снятие флага, если это делает Autofill (очистка мусора)
+	if not skip_unmark:
+		ItemManager.unmark_item_as_found(item_id)
+
 	if autofill_cab_tween and autofill_cab_tween.is_running(): autofill_cab_tween.kill()
 	ItemManager.is_dragging_item = false
 	if not ItemManager.items_db.has(item_id):

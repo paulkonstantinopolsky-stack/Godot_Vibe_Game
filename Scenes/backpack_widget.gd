@@ -1,5 +1,7 @@
 extends Control
 
+signal cascade_finished
+
 const GamePaletteResource = preload("res://game_palette.gd")
 var palette: GamePaletteResource
 
@@ -18,6 +20,24 @@ var palette: GamePaletteResource
 @export var grid_catch_radius: float = 120.0 # Дистанция захвата снаружи
 @export var grid_release_radius: float = 220.0 # Сила удержания (натяжение резинки)
 @export var fast_snap_multiplier: float = 3.5 # Сила рывка при первом попадании в сетку
+
+const BACKPACK_CLOSING_SCENE = preload("res://Scenes/backpack_closing_sequence.tscn")
+
+@export var seq_visual_offset: Vector2 = Vector2(10.0, -270.0)
+@export var seq_visual_scale_multiplier: float = 0.99
+# НОВАЯ ПЕРЕМЕННАЯ:
+@export var final_flight_y_offset: float = 600.0 # Стартуем с бОльшего значения
+
+var is_order_completed = false
+var closing_sequence_node = null
+var is_cascading: bool = false
+
+## Целевой центр рюкзака (глобальные координаты) и масштаб для lerp
+var target_bg_pos: Vector2 = Vector2.ZERO
+var target_bg_scale: Vector2 = Vector2.ONE
+## Сохранённый центр покоя (глобально)
+var original_bg_pos: Vector2 = Vector2.ZERO
+var original_bg_scale: Vector2 = Vector2.ONE
 
 var _current_snap_speed_mult: float = 1.0
 
@@ -70,6 +90,26 @@ func _ready():
 	grid.draw.connect(_on_grid_draw)
 	_update_grid_visuals()
 
+func _backpack_global_center_from_local_top_left(local_tl: Vector2, scale_vec: Vector2) -> Vector2:
+	var p = backpack_bg.get_parent()
+	var tl_global = p.global_position + local_tl
+	return tl_global + backpack_bg.size * scale_vec / 2.0
+
+func _update_edit_mode_targets() -> void:
+	if grid.get_child_count() == 0:
+		return
+	var view_size = get_viewport_rect().size
+
+	if is_order_completed:
+		target_bg_pos = (view_size / 2.0) + Vector2(0, final_flight_y_offset)
+		target_bg_scale = Vector2(1.1, 1.1)
+	elif ItemManager.is_edit_mode:
+		target_bg_pos = view_size / 2.0
+		target_bg_scale = Vector2(1.1, 1.1)
+	else:
+		target_bg_pos = original_bg_pos
+		target_bg_scale = original_bg_scale
+
 func _process(delta: float) -> void:
 	# 1. Логика превью
 	if drag_preview_container and drag_preview_container.visible:
@@ -88,64 +128,67 @@ func _process(delta: float) -> void:
 	if not magnet_enabled or not is_magnet_ready:
 		return
 
-	var target_bg_pos = bg_base_pos
-	var target_bg_scale = bg_base_scale
-	var target_bg_rot = bg_base_rot
+	_update_edit_mode_targets()
 
-	if ItemManager.is_dragging_item and not is_dragging_internal and drag_preview_container.visible:
+	var tgt_center_global = target_bg_pos
+	var tgt_scale = target_bg_scale
+	var tgt_rot = bg_base_rot
+
+	if not is_order_completed and ItemManager.is_dragging_item and not is_dragging_internal and drag_preview_container.visible:
 		var bg_rect = backpack_bg.get_global_rect().grow(20.0)
 
-		# ПРОВЕРКА ПО РЕАЛЬНОМУ ПАЛЬЦУ, А НЕ ПО ПРИЦЕЛУ
 		var real_mouse_pos = get_global_mouse_position()
 		var is_over_bg = bg_rect.has_point(real_mouse_pos)
 
 		if is_over_bg:
 			if not is_backpack_frozen:
-				# ПАЛЕЦ ВОШЕЛ В ЗОНУ РЮКЗАКА: Делаем снимок магнита и встаем на ручник
 				is_backpack_frozen = true
 				var targets = _calculate_current_magnet_targets()
 				mag_frozen_pos = targets.pos
 				mag_frozen_scale = targets.scale
 				mag_frozen_rot = targets.rot
 
-			# ПРИМЕНЯЕМ ЗАМОРОЖЕННЫЕ КООРДИНАТЫ
-			target_bg_pos = mag_frozen_pos
-			target_bg_scale = mag_frozen_scale
-			target_bg_rot = mag_frozen_rot
+			tgt_center_global = _backpack_global_center_from_local_top_left(mag_frozen_pos, mag_frozen_scale)
+			tgt_scale = mag_frozen_scale
+			tgt_rot = mag_frozen_rot
 		else:
 			if is_backpack_frozen:
-				# ПАЛЕЦ ПОКИНУЛ РЮКЗАК: Снимаем с ручника
 				is_backpack_frozen = false
 
-			# АКТИВНЫЙ МАГНИТ (Палец снаружи)
 			var targets = _calculate_current_magnet_targets()
-			target_bg_pos = targets.pos
-			target_bg_scale = targets.scale
-			target_bg_rot = targets.rot
+			tgt_center_global = _backpack_global_center_from_local_top_left(targets.pos, targets.scale)
+			tgt_scale = targets.scale
+			tgt_rot = targets.rot
 
 	elif ItemManager.is_edit_mode:
-		# Режим редактирования: рюкзак плавно взлетает и фиксируется без слежения за пальцем
-		target_bg_pos = bg_base_pos + Vector2(0.0, -magnet_max_offset)
-		target_bg_scale = bg_base_scale * magnet_scale_bump
-		target_bg_rot = bg_base_rot
-
 		is_preview_snapped = false
 		_snapped_root_cell = null
 		is_backpack_frozen = false
 
 	else:
-		# СБРОС (рюкзак возвращается в исходное положение)
 		is_preview_snapped = false
 		_snapped_root_cell = null
 		is_backpack_frozen = false
 
+	if not is_order_completed:
+		var move_speed = 10.0
+		backpack_bg.global_position = backpack_bg.global_position.lerp(
+			tgt_center_global - (backpack_bg.size * backpack_bg.scale / 2.0), delta * move_speed)
+		backpack_bg.scale = backpack_bg.scale.lerp(tgt_scale, delta * move_speed)
 	var m_weight = clampf(magnet_smoothness * delta, 0.0, 1.0)
-	backpack_bg.position = backpack_bg.position.lerp(target_bg_pos, m_weight)
-	backpack_bg.scale = backpack_bg.scale.lerp(target_bg_scale, m_weight)
-	backpack_bg.rotation_degrees = lerpf(backpack_bg.rotation_degrees, target_bg_rot, m_weight)
+	backpack_bg.rotation_degrees = lerpf(backpack_bg.rotation_degrees, tgt_rot, m_weight)
 
 	if drag_preview_container.visible:
 		drag_preview_container.rotation_degrees = backpack_bg.rotation_degrees
+
+	# СИНХРОНИЗАЦИЯ НОВОГО УЗЛА (Центр к Центру)
+	if closing_sequence_node and is_instance_valid(closing_sequence_node):
+		closing_sequence_node.size = backpack_bg.size
+		closing_sequence_node.scale = backpack_bg.scale * seq_visual_scale_multiplier
+
+		var bg_center = backpack_bg.global_position + (backpack_bg.size * backpack_bg.scale / 2.0)
+		var seq_offset = (closing_sequence_node.size * closing_sequence_node.scale) / 2.0
+		closing_sequence_node.global_position = bg_center - seq_offset + seq_visual_offset
 
 	if edit_menu and edit_menu.visible:
 		var current_bg_offset: Vector2 = backpack_bg.position - bg_base_pos
@@ -216,7 +259,8 @@ func auto_fill_and_optimize(new_items_data: Array) -> Array:
 	# 3. АНИМАЦИЯ ВОЗВРАТА: Вышвыриваем мусор обратно в шкаф
 	for wrong_item in wrong_items_to_return:
 		if get_tree().current_scene.has_method("fly_back_to_cabinet"):
-			get_tree().current_scene.fly_back_to_cabinet(wrong_item["id"], wrong_item["pos"], wrong_item["drag_node"])
+			# Передаем skip_unmark = true, чтобы не сломать учет легальных предметов!
+			get_tree().current_scene.fly_back_to_cabinet(wrong_item["id"], wrong_item["pos"], wrong_item["drag_node"], true)
 
 	var successfully_added_new = []
 	var packing_failed = false
@@ -250,11 +294,35 @@ func auto_fill_and_optimize(new_items_data: Array) -> Array:
 					break
 
 		if not placed:
-			if not pack_item["is_new"]:
-				packing_failed = true
-				break
-			else:
-				continue
+			# ФОЛЛБЭК: Жадный алгоритм не смог упаковать сложную форму.
+			# Ужимаем предмет до 1 клетки (1x1), чтобы он гарантированно влез в рюкзак!
+			var fallback_shape = [Vector2(0, 0)]
+			for cell in grid.get_children():
+				if not cell.has_node("ItemIcon"): continue
+				if _can_place_shape(cell, fallback_shape):
+					_place_item_in_grid(cell, item_id, fallback_shape, 0)
+					placed = true
+
+					if pack_item["is_new"]:
+						successfully_added_new.append({
+							"id": item_id,
+							"cell": cell,
+							"cab_node": pack_item.get("cab_node")
+						})
+						cell.get_node("ItemIcon").hide()
+						cell.set_meta("hide_bg_until_land", true)
+					else:
+						if saved_drag_nodes.has(item_id):
+							cell.set_meta("source_drag_node", saved_drag_nodes[item_id])
+					break
+
+			# Если даже 1х1 не влезло (что невозможно при правильных лимитах)
+			if not placed:
+				if not pack_item["is_new"]:
+					packing_failed = true
+					break
+				else:
+					continue
 
 	if packing_failed:
 		_clear_entire_grid()
@@ -264,21 +332,22 @@ func auto_fill_and_optimize(new_items_data: Array) -> Array:
 		return []
 
 	if successfully_added_new.size() > 0 or existing_items.size() > 0:
-		# ВАЖНО: Принудительно обновляем сетку ПОСЛЕ того, как всем новым предметам
-		# были розданы флаги 'hide_bg_until_land', чтобы избежать "невидимых" ячеек
 		_update_grid_visuals()
+		# Закрытие рюкзака вызывается из main_scene после сбора всех монет.
 		_play_autofill_cascade_animation()
 
 	return successfully_added_new
 
 
 func _play_autofill_cascade_animation() -> void:
+	is_cascading = true
 	var cell_tween: Tween = create_tween()
 	cell_tween.set_parallel(true)
 
 	var delay: float = 0.0
 	const DURATION: float = 0.3
 	const DELAY_STEP: float = 0.05
+	var any_animated = false
 
 	for cell in grid.get_children():
 		var icon = cell.get_node_or_null("ItemIcon")
@@ -286,6 +355,7 @@ func _play_autofill_cascade_animation() -> void:
 		# Анимируем только те иконки, которые сейчас ВИДИМЫ (старые предметы, которые перемешались).
 		# Новые предметы были скрыты (hide) в auto_fill_and_optimize, их покажет main_scene когда они долетят.
 		if icon and icon.visible and cell.get_meta("occupied_by_id", -1) != -1:
+			any_animated = true
 			# Убеждаемся, что пивот по центру
 			icon.pivot_offset = icon.size / 2.0
 			icon.scale = Vector2.ZERO
@@ -295,6 +365,35 @@ func _play_autofill_cascade_animation() -> void:
 				.set_delay(delay)
 
 			delay += DELAY_STEP
+
+	if not any_animated:
+		is_cascading = false
+		cascade_finished.emit()
+		return
+
+	cell_tween.finished.connect(_on_autofill_cascade_finished)
+
+
+func _apply_ideal_flight_step(
+	v: float,
+	start_center: Vector2,
+	target_center: Vector2,
+	start_scale: Vector2,
+	target_scale: Vector2
+) -> void:
+	var cur_scale = start_scale.lerp(target_scale, v)
+	var cur_center = start_center.lerp(target_center, v)
+	backpack_bg.scale = cur_scale
+	backpack_bg.global_position = cur_center - (backpack_bg.size * cur_scale / 2.0)
+	if is_instance_valid(closing_sequence_node):
+		closing_sequence_node.scale = cur_scale * seq_visual_scale_multiplier
+		var seq_offset = (closing_sequence_node.size * closing_sequence_node.scale) / 2.0
+		closing_sequence_node.global_position = cur_center - seq_offset + seq_visual_offset
+
+
+func _on_autofill_cascade_finished() -> void:
+	is_cascading = false
+	cascade_finished.emit()
 
 func _clear_entire_grid():
 	var roots = []
@@ -462,7 +561,11 @@ func _update_grid_visuals():
 		if not border: continue
 
 		var is_occupied = cell.get_meta("occupied_by_id", -1) != -1
-		var root_cell = cell.get_meta("root_cell")
+
+		# БЕЗОПАСНОЕ ПОЛУЧЕНИЕ META: достаем корень только если он существует
+		var root_cell = null
+		if cell.has_meta("root_cell"):
+			root_cell = cell.get_meta("root_cell")
 
 		# Если предмет летит, ячейка считает себя визуально "пустой" для рамки
 		var is_waiting = is_occupied and root_cell and root_cell.get_meta("hide_bg_until_land", false)
@@ -475,9 +578,7 @@ func _update_grid_visuals():
 			border.hide()
 		else:
 			border.show()
-			# Возвращаем стандартное поведение без пунктиров
 			border.set_state(1 if ItemManager.is_edit_mode else 0)
-			# Форсируем альфу, чтобы рамка появлялась мгновенно, не дожидаясь Tween-анимации
 			border.alpha_default = 1.0
 
 	grid.queue_redraw()
@@ -1168,6 +1269,8 @@ func start_appear_animation():
 		bg_base_pos = backpack_bg.position
 		bg_base_scale = backpack_bg.scale
 		bg_base_rot = backpack_bg.rotation_degrees
+		original_bg_pos = backpack_bg.global_position + backpack_bg.size * backpack_bg.scale / 2.0
+		original_bg_scale = backpack_bg.scale
 		is_magnet_ready = true # Включаем магнит только когда рюкзак встал на место
 	)
 
@@ -1221,3 +1324,68 @@ func create_standalone_puzzle_visual(item_id: int, shape: Array, rot_deg: int) -
 	container.pivot_offset = container.size / 2.0
 
 	return container
+
+func start_order_completed_sequence() -> void:
+	if closing_sequence_node != null:
+		return
+
+	if is_cascading:
+		await cascade_finished
+
+	# «Вдох» перед прыжком: короткая пауза, чтобы сцена «успокоилась»
+	await get_tree().create_timer(0.15).timeout
+
+	is_order_completed = true
+	_close_edit_mode()
+
+	grid.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	for cell in grid.get_children():
+		cell.mouse_filter = Control.MOUSE_FILTER_IGNORE
+
+	closing_sequence_node = BACKPACK_CLOSING_SCENE.instantiate()
+	closing_sequence_node.modulate.a = 0.0
+	closing_sequence_node.set_meta("MOUSE_FILTER_IGNORE", true)
+	get_parent().add_child(closing_sequence_node)
+
+	closing_sequence_node.size = backpack_bg.size
+	closing_sequence_node.scale = backpack_bg.scale * seq_visual_scale_multiplier
+	var bg_center = backpack_bg.global_position + (backpack_bg.size * backpack_bg.scale / 2.0)
+	var seq_offset = (closing_sequence_node.size * closing_sequence_node.scale) / 2.0
+	closing_sequence_node.global_position = bg_center - seq_offset + seq_visual_offset
+
+	var start_center = backpack_bg.global_position + (backpack_bg.size * backpack_bg.scale / 2.0)
+	var target_center = (get_viewport_rect().size / 2.0) + Vector2(0, final_flight_y_offset)
+	var start_scale = backpack_bg.scale
+	var target_scale = Vector2(1.1, 1.1)
+
+	var fade_tw = create_tween().set_parallel(true)
+
+	# TRANS_BACK + EASE_IN_OUT: лёгкий замах, затем мягкое торможение и overshoot (~0.95 с)
+	fade_tw.tween_method(
+		_apply_ideal_flight_step.bind(start_center, target_center, start_scale, target_scale),
+		0.0,
+		1.0,
+		0.95
+	).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_IN_OUT)
+
+	fade_tw.tween_property(grid, "modulate:a", 0.0, 0.3).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+	fade_tw.tween_property(closing_sequence_node, "modulate:a", 1.0, 0.4).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+	fade_tw.tween_property(backpack_bg, "modulate:a", 0.0, 0.4).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT).set_delay(0.1)
+
+	fade_tw.chain().tween_callback(func():
+		if closing_sequence_node:
+			closing_sequence_node.set_meta("MOUSE_FILTER_IGNORE", false)
+			closing_sequence_node.mouse_filter = Control.MOUSE_FILTER_STOP
+			closing_sequence_node.packing_completed.connect(_on_packing_final_completed)
+	)
+
+func _on_packing_final_completed() -> void:
+	is_order_completed = false
+	if closing_sequence_node:
+		closing_sequence_node.queue_free()
+		closing_sequence_node = null
+
+	_clear_entire_grid()
+
+	if get_tree().current_scene.has_method("_on_level_completed"):
+		get_tree().current_scene._on_level_completed()

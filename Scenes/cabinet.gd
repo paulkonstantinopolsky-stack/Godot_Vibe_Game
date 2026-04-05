@@ -68,6 +68,19 @@ var bonus_post_open_delay_multiplier: float = 1.0
 var bonus_fixed_post_open_delay: float = -1.0
 
 var _is_first_bonus_reveal: bool = true
+## Сколько красных бонусных ячеек было после сборки шкафа (до pop_front в reveal)
+var _bonus_red_cell_count: int = 0
+var _no_bonus_complete_timer: SceneTreeTimer
+var _reward_session_id: int = 0
+var _no_bonus_close_pending: bool = false
+
+## Все бонусные монеты собраны (последняя убрана из очереди)
+signal all_bonus_coins_collected
+## Последняя монета визуально долетела до конца анимации полёта
+signal all_rewards_collected_visually
+
+var _coins_in_flight: int = 0
+var is_level_finished: bool = false
 
 func set_bonus_reveal_speed_multiplier(mult: float) -> void:
 	bonus_reveal_speed_multiplier = max(mult, 0.01)
@@ -82,6 +95,8 @@ func _ready() -> void:
 	hide()
 
 func _process(delta: float) -> void:
+	if is_level_finished:
+		return
 	if not can_rotate:
 		return
 
@@ -105,6 +120,8 @@ func _process(delta: float) -> void:
 			_begin_snap_to_face(target_y)
 
 func _input(event: InputEvent) -> void:
+	if is_level_finished:
+		return
 	if not can_rotate:
 		return
 
@@ -139,12 +156,16 @@ func _input(event: InputEvent) -> void:
 		_apply_direct_rotation(event.relative.x)
 
 func _on_rotate_grab() -> void:
+	if is_level_finished:
+		return
 	is_dragging = true
 	angular_velocity = 0.0
 	_stop_snap()
 	current_rotation_y = rotation_degrees.y
 
 func _apply_direct_rotation(rel_x: float) -> void:
+	if is_level_finished:
+		return
 	var delta_rot: float = rel_x * swipe_sensitivity
 	current_rotation_y += delta_rot
 	rotation_degrees.y = current_rotation_y
@@ -191,6 +212,8 @@ func _get_camera_angle_xz(default_angle: float = PI / 2.0) -> float:
 	return cam_angle
 
 func focus_item_face_to_camera(item_node: Node3D, duration: float = 0.35, force: bool = false) -> void:
+	if is_level_finished:
+		return
 	if item_node == null or not is_instance_valid(item_node):
 		return
 	var cell = item_node.get_parent()
@@ -222,6 +245,7 @@ func focus_item_face_to_camera(item_node: Node3D, duration: float = 0.35, force:
 	focus_tween.finished.connect(func(): current_rotation_y = rotation_degrees.y)
 
 func build_cabinet_tornado() -> void:
+	is_level_finished = false
 	for child in get_children():
 		child.hide() # Спрятать перед удалением
 		child.queue_free()
@@ -231,6 +255,8 @@ func build_cabinet_tornado() -> void:
 	active_red_cells.clear()
 	unlocked_coin_cols.clear()
 	_is_first_bonus_reveal = true
+	_reward_session_id += 1
+	_no_bonus_close_pending = false
 
 	var spawn_list = []
 	for order_item in ItemManager.current_order:
@@ -313,9 +339,14 @@ func build_cabinet_tornado() -> void:
 
 	_place_caps_sync(total_assembly_time)
 
+	_bonus_red_cell_count = active_red_cells.size()
+
 func reveal_next_bonus_cell(callback: Callable):
 	if active_red_cells.size() == 0:
 		callback.call()
+		# Нет красных ячеек с монетами — on_coin_collected никогда не опустит список, сигнал не придёт.
+		if _bonus_red_cell_count == 0:
+			_schedule_all_bonus_coins_collected_no_coins()
 		return
 		
 	var data = active_red_cells.pop_front()
@@ -403,13 +434,32 @@ func _place_caps_sync(duration: float) -> void:
 # ПОСЛЕДОВАТЕЛЬНОСТЬ СБОРА МОНЕТ (всегда слева направо)
 # =============================================================
 
+func _schedule_all_bonus_coins_collected_no_coins() -> void:
+	if _no_bonus_close_pending:
+		return
+	_no_bonus_close_pending = true
+	var session := _reward_session_id
+	_no_bonus_complete_timer = get_tree().create_timer(0.2)
+	_no_bonus_complete_timer.timeout.connect(func():
+		_no_bonus_complete_timer = null
+		_no_bonus_close_pending = false
+		if session != _reward_session_id:
+			return
+		if is_instance_valid(self):
+			is_level_finished = true
+			can_rotate = false
+			angular_velocity = 0.0
+			all_rewards_collected_visually.emit()
+			all_bonus_coins_collected.emit()
+	)
+
 # Регистрируем открытую ячейку с монетой в порядке колонок
 func _register_coin_col(col: int) -> void:
 	if not col in unlocked_coin_cols:
 		unlocked_coin_cols.append(col)
 		unlocked_coin_cols.sort()  # Сортируем по возрастанию → слева направо
 
-# Вызывается из coin_3d.gd после завершения анимации сбора монеты.
+# Вызывается из coin_3d.gd в начале сбора монеты (до полёта); здесь же учитываем +1 к летящим.
 # Следующей всегда становится ячейка ПРАВЕЕ собранной (по возрастанию колонки),
 # а если правее ничего нет — переходим к крайней левой из оставшихся.
 func on_coin_collected(col: int) -> void:
@@ -417,9 +467,9 @@ func on_coin_collected(col: int) -> void:
 	if idx < 0:
 		return  # Монетка уже не в списке — ничего не делаем
 	unlocked_coin_cols.remove_at(idx)
+	_coins_in_flight += 1
 
 	if unlocked_coin_cols.is_empty():
-		# Все монеты собраны — отпускаем управление шкафом
 		can_rotate = true
 		angular_velocity = 0.0
 		return
@@ -450,3 +500,15 @@ func _rotate_to_coin_col(next_col: int) -> void:
 	coin_seq_tween = create_tween().set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
 	coin_seq_tween.tween_property(self, "rotation_degrees:y", target_coin_deg, 0.7)
 	coin_seq_tween.finished.connect(func(): current_rotation_y = rotation_degrees.y)
+
+
+func _on_bonus_coin_flight_finished() -> void:
+	_coins_in_flight = maxi(_coins_in_flight - 1, 0)
+
+	if _coins_in_flight == 0 and unlocked_coin_cols.is_empty() and active_red_cells.is_empty():
+		if is_instance_valid(self):
+			is_level_finished = true
+			can_rotate = false
+			angular_velocity = 0.0
+			all_rewards_collected_visually.emit()
+			all_bonus_coins_collected.emit()
