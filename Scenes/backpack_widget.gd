@@ -386,53 +386,103 @@ func _play_autofill_cascade_animation() -> void:
 func _apply_ideal_flight_step(v: float, start_center: Vector2, target_center: Vector2, start_scale: Vector2, target_scale: Vector2) -> void:
 	var cur_center = start_center
 	var cur_scale = start_scale
+	# Прыжок стал ниже (было -460)
+	var apex_center = target_center + Vector2(0, -320.0)
 
-	# Прыгаем на 460 пикселей вверх!
-	var apex_center = target_center + Vector2(0, -460.0)
+	var cam_3d = get_tree().get_first_node_in_group("main_camera")
+	if is_instance_valid(cam_3d) and not cam_3d.has_meta("base_rot_x"):
+		cam_3d.set_meta("base_rot_x", cam_3d.rotation_degrees.x)
+		cam_3d.set_meta("base_pos_y", cam_3d.global_position.y)
 
-	# ФАЗА 1: Резкий взлет (0% - 40%)
-	if v <= 0.4:
-		var t = v / 0.4
+	var target_rot_x = 0.0
+	var target_pos_y = 0.0
+	if is_instance_valid(cam_3d):
+		target_rot_x = cam_3d.get_meta("base_rot_x")
+		target_pos_y = cam_3d.get_meta("base_pos_y")
+
+	# --- 4-ФАЗНАЯ КИНЕМАТОГРАФИЧНАЯ ДИНАМИКА ---
+
+	# ФАЗА 1: Взрывной взлет (0% - 25%) - Очень быстрый
+	if v <= 0.25:
+		var t = v / 0.25
 		var ease_t = sin(t * PI / 2.0)
 		cur_center = start_center.lerp(apex_center, ease_t)
-		cur_scale = start_scale.lerp(target_scale, ease_t)
 
+		# Резкая деформация при старте
 		var pop = sin(t * PI)
-		cur_scale.y += pop * 0.2
-		cur_scale.x -= pop * 0.1
+		cur_scale.y += pop * 0.25
+		cur_scale.x -= pop * 0.12
+		cur_scale = cur_scale.lerp(target_scale * 0.6, ease_t) # Уходим в Vertigo
 
-	# ФАЗА 2: Мощное падение (40% - 65%)
-	elif v <= 0.65:
-		var t = (v - 0.4) / 0.25
-		var ease_t = t * t * t
+		# Камера реагирует мягче
+		target_rot_x += (cur_center.y - target_center.y) * -0.045 * ease_t
+		target_pos_y += (cur_center.y - target_center.y) * 0.015 * ease_t
 
+	# ФАЗА 2: ЗАМЕДЛЕНИЕ ВРЕМЕНИ / HANG TIME (25% - 60%) - Самая длинная фаза
+	elif v <= 0.6:
+		var t = (v - 0.25) / 0.35
+		# Рюкзак почти замер, лишь слегка "дрейфует" вверх-вниз (эффект невесомости)
+		var hover_offset = sin(t * PI) * -15.0
+		cur_center = apex_center + Vector2(0, hover_offset)
+
+		# Масштаб Vertigo (0.6) зафиксирован на пике
+		cur_scale = target_scale * 0.6
+
+		# Мягкий ракурс на пике
+		var jump_y = (apex_center.y + hover_offset) - target_center.y
+		target_rot_x += jump_y * -0.045
+		target_pos_y += jump_y * 0.015
+
+	# ФАЗА 3: Стремительное падение (60% - 80%) - Ускорение
+	elif v <= 0.8:
+		var t = (v - 0.6) / 0.2
+		var ease_t = t * t * t # Тяжелая гравитация
 		cur_center = apex_center.lerp(target_center, ease_t)
-		cur_scale = target_scale
 
-		# Рюкзак вытягивается все сильнее по мере набора скорости (t * t).
-		# В самом конце (t=1.0) он максимально вытянут (+0.3 по Y).
+		# Восстановление масштаба ПЕРЕД смеаром (как ты поправил)
+		var scale_restore_t = 1.0 - cos(t * PI / 2.0)
+		cur_scale = (target_scale * 0.6).lerp(target_scale, scale_restore_t)
+
+		# Смеар-эффект падения
 		var fall_stretch = (t * t) * 0.3
 		cur_scale.y += fall_stretch
 		cur_scale.x -= fall_stretch * 0.5
 
-	# ФАЗА 3: Бесшовный шлепок и желе (65% - 100%)
+		# Мягкий возврат камеры
+		var t_cam = 1.0 - sin(t * PI / 2.0)
+		var jump_y = cur_center.y - target_center.y
+		target_rot_x += jump_y * -0.045 * t_cam
+		target_pos_y += jump_y * 0.015 * t_cam
+
+	# ФАЗА 4: Импакт и желе (80% - 100%)
 	else:
-		var t = (v - 0.65) / 0.35
+		var t = (v - 0.8) / 0.2
 		cur_center = target_center
-
 		var decay = exp(-6.0 * t)
-
-		# ВОЗВРАЩАЕМ COS!
-		# cos(0) = 1. Это значит, что на старте мы идеально подхватываем
-		# максимальное вытягивание (+0.3) из Фазы 2, и тут же переводим его в минус (сплющивание).
-		var wobble = cos(t * PI * 3.0) * 0.3 * decay
-
+		var wobble = cos(t * PI * 3.0) * 0.4 * decay # Сочный шлепок
 		cur_scale = target_scale
-		# ПЛЮС wobble (начинаем с вытяжения, падаем в сплющивание)
 		cur_scale.y += wobble
 		cur_scale.x -= wobble * 0.5
 
-	# Применение
+	# --- ТРЯСКА И ПРИМЕНЕНИЕ ---
+	var shake_2d = Vector2.ZERO
+	if v > 0.8 and v < 1.0:
+		var t_s = (v - 0.8) / 0.2
+		var decay = exp(-6.0 * t_s)
+		shake_2d.x = sin(t_s * PI * 35.0) * 18.0 * decay
+		shake_2d.y = cos(t_s * PI * 45.0) * 18.0 * decay
+		if is_instance_valid(cam_3d):
+			cam_3d.h_offset = shake_2d.x * 0.02
+			cam_3d.v_offset = shake_2d.y * 0.02
+	elif is_instance_valid(cam_3d):
+		cam_3d.h_offset = 0.0
+		cam_3d.v_offset = 0.0
+
+	if is_instance_valid(cam_3d):
+		cam_3d.rotation_degrees.x = target_rot_x
+		cam_3d.global_position.y = target_pos_y
+
+	cur_center += shake_2d
 	backpack_bg.scale = cur_scale
 	backpack_bg.global_position = cur_center - (backpack_bg.size * cur_scale / 2.0)
 
@@ -1412,12 +1462,12 @@ func start_order_completed_sequence() -> void:
 
 	var fade_tw = create_tween().bind_node(self).set_parallel(true)
 
-	# Линейный твин: время течет равномерно (0.5 сек), фазы задаём в _apply_ideal_flight_step.
+	# Линейный твин: время течет равномерно (0.9 сек), фазы задаём в _apply_ideal_flight_step.
 	fade_tw.tween_method(
 		_apply_ideal_flight_step.bind(start_center, target_center, start_scale, target_scale),
 		0.0,
 		1.0,
-		0.5 # Ускорили до 0.5с
+		0.9 # Увеличили до 0.9с для эффекта слоу-мо
 	).set_trans(Tween.TRANS_LINEAR).set_ease(Tween.EASE_IN_OUT)
 
 	# Затухание сетки (синхронизируем с исчезновением подложки старого рюкзака)
