@@ -23,9 +23,10 @@ offset_bottom = 505.0
 grow_horizontal = 2
 grow_vertical = 2
 script = ExtResource("1_j0lkr")
-bg_fade_out_delay = 0.5
-bg_fade_out_duration = 0.8
-seq_fade_in_delay = 0.5
+bg_fade_out_delay = 0.4
+bg_fade_out_duration = 0.2
+seq_fade_in_delay = 0.4
+seq_fade_in_duration = 0.2
 
 [node name="BackpackBG" type="TextureRect" parent="." unique_id=563814319]
 texture_filter = 6

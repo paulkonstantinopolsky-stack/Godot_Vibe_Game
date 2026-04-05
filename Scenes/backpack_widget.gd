@@ -383,17 +383,59 @@ func _play_autofill_cascade_animation() -> void:
 	cell_tween.finished.connect(_on_autofill_cascade_finished)
 
 
-func _apply_ideal_flight_step(
-	v: float,
-	start_center: Vector2,
-	target_center: Vector2,
-	start_scale: Vector2,
-	target_scale: Vector2
-) -> void:
-	var cur_scale = start_scale.lerp(target_scale, v)
-	var cur_center = start_center.lerp(target_center, v)
+func _apply_ideal_flight_step(v: float, start_center: Vector2, target_center: Vector2, start_scale: Vector2, target_scale: Vector2) -> void:
+	var cur_center = start_center
+	var cur_scale = start_scale
+
+	# Прыгаем на 460 пикселей вверх!
+	var apex_center = target_center + Vector2(0, -460.0)
+
+	# ФАЗА 1: Резкий взлет (0% - 40%)
+	if v <= 0.4:
+		var t = v / 0.4
+		var ease_t = sin(t * PI / 2.0)
+		cur_center = start_center.lerp(apex_center, ease_t)
+		cur_scale = start_scale.lerp(target_scale, ease_t)
+
+		var pop = sin(t * PI)
+		cur_scale.y += pop * 0.2
+		cur_scale.x -= pop * 0.1
+
+	# ФАЗА 2: Мощное падение (40% - 65%)
+	elif v <= 0.65:
+		var t = (v - 0.4) / 0.25
+		var ease_t = t * t * t
+
+		cur_center = apex_center.lerp(target_center, ease_t)
+		cur_scale = target_scale
+
+		# Рюкзак вытягивается все сильнее по мере набора скорости (t * t).
+		# В самом конце (t=1.0) он максимально вытянут (+0.3 по Y).
+		var fall_stretch = (t * t) * 0.3
+		cur_scale.y += fall_stretch
+		cur_scale.x -= fall_stretch * 0.5
+
+	# ФАЗА 3: Бесшовный шлепок и желе (65% - 100%)
+	else:
+		var t = (v - 0.65) / 0.35
+		cur_center = target_center
+
+		var decay = exp(-6.0 * t)
+
+		# ВОЗВРАЩАЕМ COS!
+		# cos(0) = 1. Это значит, что на старте мы идеально подхватываем
+		# максимальное вытягивание (+0.3) из Фазы 2, и тут же переводим его в минус (сплющивание).
+		var wobble = cos(t * PI * 3.0) * 0.3 * decay
+
+		cur_scale = target_scale
+		# ПЛЮС wobble (начинаем с вытяжения, падаем в сплющивание)
+		cur_scale.y += wobble
+		cur_scale.x -= wobble * 0.5
+
+	# Применение
 	backpack_bg.scale = cur_scale
 	backpack_bg.global_position = cur_center - (backpack_bg.size * cur_scale / 2.0)
+
 	if is_instance_valid(closing_sequence_node):
 		closing_sequence_node.scale = cur_scale * seq_visual_scale_multiplier
 		var seq_offset = (closing_sequence_node.size * closing_sequence_node.scale) / 2.0
@@ -1362,22 +1404,21 @@ func start_order_completed_sequence() -> void:
 	closing_sequence_node.global_position = bg_center - seq_offset + seq_visual_offset
 
 	var start_center = backpack_bg.global_position + (backpack_bg.size * backpack_bg.scale / 2.0)
-	var view_size = get_viewport_rect().size
 
-	# Блокируем ось X (берем start_center.x), меняем только Y (высоту полета)
-	var target_center = Vector2(start_center.x, (view_size.y / 2.0) + final_flight_y_offset)
+	# Точка приземления теперь равна точке старта. Прыжок на месте!
+	var target_center = start_center
 	var start_scale = backpack_bg.scale
 	var target_scale = Vector2(1.1, 1.1)
 
 	var fade_tw = create_tween().bind_node(self).set_parallel(true)
 
-	# TRANS_BACK + EASE_IN_OUT: лёгкий замах, затем мягкое торможение и overshoot (~0.95 с)
+	# Линейный твин: время течет равномерно (0.5 сек), фазы задаём в _apply_ideal_flight_step.
 	fade_tw.tween_method(
 		_apply_ideal_flight_step.bind(start_center, target_center, start_scale, target_scale),
 		0.0,
 		1.0,
-		0.95
-	).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_IN_OUT)
+		0.5 # Ускорили до 0.5с
+	).set_trans(Tween.TRANS_LINEAR).set_ease(Tween.EASE_IN_OUT)
 
 	# Затухание сетки (синхронизируем с исчезновением подложки старого рюкзака)
 	fade_tw.tween_property(grid, "modulate:a", 0.0, bg_fade_out_duration).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT).set_delay(bg_fade_out_delay)
