@@ -1,3 +1,1187 @@
+================================================================================
+Animated_Backpack_Closing.txt — bundle for AI code review
+================================================================================
+
+INDEX (кратко по файлам)
+
+• res://Scenes/backpack_widget.gd — главный UI рюкзака: сетка паззла, магнит, автозаполнение, каскад,
+  start_order_completed_sequence: tween_method полёта по центру + кроссфейд 2D/3D, сигнал cascade_finished.
+
+• res://Scenes/backpack_closing_sequence.gd — оверлей закрытия: 8 кадров PNG, драг ручки, packing_completed.
+
+• res://Scenes/cabinet.gd — 3D-шкаф: сборка, вращение, бонусные монеты, счётчик полёта, сигналы наград,
+  is_level_finished блокирует ввод после финала.
+
+• res://Scenes/main_scene.gd — сцена уровня: конверт, таймер, автозаполнение, полёт иконок в рюкзак,
+  подключение all_rewards_collected_visually → start_order_completed_sequence, Perfect popup.
+
+• res://Scenes/coin_3d.gd — полёт бонусной монеты из ячейки, вызовы cabinet.on_coin_collected и _on_bonus_coin_flight_finished.
+
+================================================================================
+
+
+
+================================================================================
+FILE: res://Scenes/backpack_closing_sequence.gd
+================================================================================
+
+extends Control
+
+signal packing_completed
+
+@onready var frame_display = $FrameDisplay
+@onready var drag_handle = $DragHandle
+
+# УКАЖИ ЗДЕСЬ ПУТИ К ТВОИМ 8 КАДРАМ!
+var frames = [
+	preload("res://Assets/Backpack_animation/B1.png"), # Замени на свои пути
+	preload("res://Assets/Backpack_animation/B2.png"),
+	preload("res://Assets/Backpack_animation/B3.png"),
+	preload("res://Assets/Backpack_animation/B4.png"),
+	preload("res://Assets/Backpack_animation/B5.png"),
+	preload("res://Assets/Backpack_animation/B6.png"),
+	preload("res://Assets/Backpack_animation/B7.png"),
+	preload("res://Assets/Backpack_animation/B8.png")
+]
+
+var total_frames = 8
+var current_frame_index = 0
+
+var is_dragging = false
+var drag_start_y = 0.0
+var frame_start_index = 0
+@export var drag_sensitivity = 400.0 # В пикселях: сколько нужно потянуть для полного закрытия
+
+func _ready():
+	current_frame_index = 0
+	_update_frame()
+	drag_handle.gui_input.connect(_on_handle_input)
+
+func _update_frame():
+	if frames.size() > 0 and current_frame_index < frames.size():
+		frame_display.texture = frames[current_frame_index]
+
+func _on_handle_input(event):
+	if event is InputEventScreenTouch or (event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT):
+		if event.pressed:
+			is_dragging = true
+			drag_start_y = event.position.y
+			frame_start_index = current_frame_index
+		else:
+			is_dragging = false
+			_check_snap()
+
+	elif event is InputEventScreenDrag or (event is InputEventMouseMotion and is_dragging):
+		if is_dragging:
+			var delta_y = event.position.y - drag_start_y
+			var frame_delta = int((delta_y / drag_sensitivity) * total_frames)
+			var new_index = clamp(frame_start_index + frame_delta, 0, total_frames - 1)
+
+			if new_index != current_frame_index:
+				current_frame_index = new_index
+				_update_frame()
+
+func _check_snap():
+	var target_frame = 0
+	if current_frame_index > total_frames / 2:
+		target_frame = total_frames - 1
+
+	var tween = create_tween()
+	tween.tween_method(_animate_frame_snap, current_frame_index, target_frame, 0.3)
+	tween.finished.connect(_on_snap_finished)
+
+func _animate_frame_snap(frame_val):
+	current_frame_index = int(frame_val)
+	_update_frame()
+
+func _on_snap_finished():
+	if current_frame_index == total_frames - 1:
+		emit_signal("packing_completed")
+
+
+================================================================================
+FILE: res://Scenes/coin_3d.gd
+================================================================================
+
+extends Node3D
+
+var is_collected = false
+var is_unlocked = false
+
+func unlock():
+	is_unlocked = true
+
+	# Небольшая пауза (0.4 сек), чтобы игрок успел насладиться взрывом конфетти
+	# и осознать награду, прежде чем она улетит
+	get_tree().create_timer(0.4).timeout.connect(func():
+		if not is_collected:
+			is_collected = true
+			collect_coin()
+	)
+
+func collect_coin():
+	if not is_inside_tree(): return
+
+	var main_scene = get_tree().current_scene
+
+	# Ищем шкаф, поднимаясь по родителям
+	var cabinet_node = get_parent()
+	while cabinet_node != null and not cabinet_node.has_method("reveal_next_bonus_cell"):
+		cabinet_node = cabinet_node.get_parent()
+
+	if cabinet_node == null:
+		printerr("ОШИБКА: Шкаф не найден! Анимация отменена.")
+		is_collected = false
+		return
+
+	# Запоминаем колонку ДО того как перепривяжемся к main_scene.
+	# Метаданные "cabinet_col" устанавливаются шкафом в reveal_next_bonus_cell.
+	var my_col: int = -1
+	var parent_cell = get_parent()
+	if parent_cell and parent_cell.has_meta("cabinet_col"):
+		my_col = parent_cell.get_meta("cabinet_col")
+
+	# Вычисляем направление от центра шкафа к монетке (только по XZ).
+	var direction_out = global_position - cabinet_node.global_position
+	direction_out.y = 0
+	if direction_out.length_squared() < 0.0001:
+		direction_out = -global_basis.z
+		direction_out.y = 0
+	direction_out = direction_out.normalized()
+
+	var out_distance = 1.2
+	var final_out_pos = global_position + (direction_out * out_distance)
+
+	# Сообщаем шкафу СРАЗУ — поворот к следующей монете начинается параллельно с анимацией
+	if my_col >= 0 and is_instance_valid(cabinet_node) and cabinet_node.has_method("on_coin_collected"):
+		cabinet_node.on_coin_collected(my_col)
+
+	var tw = create_tween().set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+
+	# Отрываем от шкафа (перепривязка к main_scene для свободного полёта)
+	tw.tween_callback(func():
+		var old_global_transform = global_transform
+		if get_parent():
+			get_parent().remove_child(self)
+		main_scene.add_child(self)
+		global_transform = old_global_transform
+	)
+
+	# Шаг 1: Быстро выдвигаем из ячейки
+	tw.tween_property(self, "global_position", final_out_pos, 0.18)
+	tw.tween_interval(0.1)
+
+	# Шаг 2: Летим вверх с вращением
+	var spin_degrees = 360.0
+	var up_distance = 10.0
+	tw.parallel().tween_property(self, "global_position:y", final_out_pos.y + up_distance, 1.2)
+	tw.parallel().tween_property(self, "rotation_degrees:y", rotation_degrees.y + spin_degrees, 1.2).set_ease(Tween.EASE_IN_OUT)
+
+	tw.tween_callback(func():
+		if cabinet_node and is_instance_valid(cabinet_node) and cabinet_node.has_method("_on_bonus_coin_flight_finished"):
+			cabinet_node._on_bonus_coin_flight_finished()
+		queue_free()
+	)
+
+
+================================================================================
+FILE: res://Scenes/cabinet.gd
+================================================================================
+
+extends Node3D
+
+const COLUMNS: int = 8
+const STEP_ANGLE: float = deg_to_rad(45.0)
+const ROWS: int = 5
+const CELL_HEIGHT: float = 1.25
+const VERTICAL_SPACING: float = 1.6
+const BLENDER_RADIUS: float = 1.88
+const CAP_FIT_RADIUS: float = 1.9
+const CAP_BOTTOM_Y: float = -1.3
+const CAP_TOP_Y_MARGIN: float = 0.0
+
+@export_group("Параметры анимации")
+@export var cell_fly_duration: float = 1.2
+@export var spawn_distance_min: float = 15.0
+@export var spawn_distance_max: float = 30.0
+@export var total_rotation_degrees: float = 360.0
+
+@export_group("Поэтапная сборка")
+@export var delay_between_rows: float = 0.2
+@export var delay_between_cells_in_row: float = 0.05
+
+@export_group("ГЕОМЕТРИЯ (Стыковка)")
+@export var width_scale: float = 1.01
+@export var geometric_radial_offset: float = 0.0
+@export var manual_mesh_width: float = 2.0
+
+@export_group("Интерполяция")
+@export var trans_type: Tween.TransitionType = Tween.TRANS_CUBIC
+@export var ease_type: Tween.EaseType = Tween.EASE_OUT
+
+@export_group("Inertia Physics")
+@export var swipe_sensitivity: float = 0.5
+@export var max_angular_velocity: float = 25.0
+@export var friction: float = 3.0
+@export var snap_threshold: float = 2.0
+@export var snap_duration: float = 0.25
+@export var face_angle_step: float = 45.0
+
+@export_group("Хаптик (Сейф)")
+@export var haptics_enabled: bool = true
+@export var haptic_click_ms: int = 10
+
+const SNAP_ANGLE_EPS: float = 0.01
+
+var can_rotate: bool = false
+var is_dragging: bool = false
+## Скорость в градусах за кадр (_physics-like для инерции)
+var angular_velocity: float = 0.0
+## Текущий yaw в градусах (синхрон с rotation_degrees.y)
+var current_rotation_y: float = 0.0
+var snap_tween: Tween
+var last_haptic_index: int = 0
+
+var red_cell_scene = preload("res://Scenes/Cell_Red.tscn")
+var green_cell_scene = preload("res://Scenes/Cell_Green.tscn")
+var cap_scene = preload("res://Scenes/Top_Down.tscn")
+var item_3d_scene = preload("res://Scenes/Item_3d.tscn")
+
+var active_red_cells = []
+var focus_tween: Tween
+var bonus_reveal_speed_multiplier: float = 1.0
+
+# --- Последовательность сбора монет ---
+var unlocked_coin_cols: Array = []  # Отсортированный список колонок с открытыми монетами
+var coin_seq_tween: Tween
+var bonus_post_open_delay_multiplier: float = 1.0
+var bonus_fixed_post_open_delay: float = -1.0
+
+var _is_first_bonus_reveal: bool = true
+## Сколько красных бонусных ячеек было после сборки шкафа (до pop_front в reveal)
+var _bonus_red_cell_count: int = 0
+var _no_bonus_complete_timer: SceneTreeTimer
+var _reward_session_id: int = 0
+var _no_bonus_close_pending: bool = false
+
+## Все бонусные монеты собраны (последняя убрана из очереди)
+signal all_bonus_coins_collected
+## Последняя монета визуально долетела до конца анимации полёта
+signal all_rewards_collected_visually
+
+var _coins_in_flight: int = 0
+var is_level_finished: bool = false
+
+func set_bonus_reveal_speed_multiplier(mult: float) -> void:
+	bonus_reveal_speed_multiplier = max(mult, 0.01)
+
+func set_bonus_post_open_delay_multiplier(mult: float) -> void:
+	bonus_post_open_delay_multiplier = max(mult, 0.01)
+
+func set_bonus_fixed_post_open_delay(seconds: float) -> void:
+	bonus_fixed_post_open_delay = seconds
+
+func _ready() -> void:
+	hide()
+
+func _process(delta: float) -> void:
+	if is_level_finished:
+		return
+	if not can_rotate:
+		return
+
+	if snap_tween and snap_tween.is_running():
+		current_rotation_y = rotation_degrees.y
+		_check_haptic_click()
+		return
+
+	if is_dragging:
+		return
+
+	if abs(angular_velocity) > snap_threshold:
+		current_rotation_y += angular_velocity * (delta * 60.0) # Компенсация под 60 FPS
+		rotation_degrees.y = current_rotation_y
+		angular_velocity = lerpf(angular_velocity, 0.0, friction * delta)
+		_check_haptic_click()
+	else:
+		angular_velocity = 0.0
+		var target_y: float = round(current_rotation_y / face_angle_step) * face_angle_step
+		if abs(target_y - current_rotation_y) > SNAP_ANGLE_EPS:
+			_begin_snap_to_face(target_y)
+
+func _input(event: InputEvent) -> void:
+	if is_level_finished:
+		return
+	if not can_rotate:
+		return
+
+	if ItemManager.is_dragging_item:
+		if event is InputEventMouseButton or event is InputEventScreenTouch:
+			if not event.pressed:
+				is_dragging = false
+		return
+
+	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
+		if event.pressed:
+			_on_rotate_grab()
+		else:
+			is_dragging = false
+		return
+
+	if event is InputEventScreenTouch:
+		if event.pressed:
+			_on_rotate_grab()
+		else:
+			is_dragging = false
+		return
+
+	if not is_dragging:
+		return
+
+	if event is InputEventMouseMotion:
+		if not Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT):
+			return
+		_apply_direct_rotation(event.relative.x)
+	elif event is InputEventScreenDrag:
+		_apply_direct_rotation(event.relative.x)
+
+func _on_rotate_grab() -> void:
+	if is_level_finished:
+		return
+	is_dragging = true
+	angular_velocity = 0.0
+	_stop_snap()
+	current_rotation_y = rotation_degrees.y
+
+func _apply_direct_rotation(rel_x: float) -> void:
+	if is_level_finished:
+		return
+	var delta_rot: float = rel_x * swipe_sensitivity
+	current_rotation_y += delta_rot
+	rotation_degrees.y = current_rotation_y
+	angular_velocity = rel_x * swipe_sensitivity
+	angular_velocity = clampf(angular_velocity, -max_angular_velocity, max_angular_velocity)
+	# Щелчки только через хаптики, без визуального притяжения к грани во время драга
+	_check_haptic_click()
+
+func _begin_snap_to_face(target_y: float) -> void:
+	_stop_snap()
+	snap_tween = create_tween()
+	snap_tween.set_parallel(true)
+	snap_tween.tween_property(self, "current_rotation_y", target_y, snap_duration)\
+		.set_trans(Tween.TRANS_QUART).set_ease(Tween.EASE_OUT)
+	snap_tween.tween_property(self, "rotation_degrees:y", target_y, snap_duration)\
+		.set_trans(Tween.TRANS_QUART).set_ease(Tween.EASE_OUT)
+	snap_tween.finished.connect(func():
+		current_rotation_y = rotation_degrees.y
+		_check_haptic_click()
+	)
+
+func _check_haptic_click() -> void:
+	if not haptics_enabled:
+		return
+	var step: float = maxf(face_angle_step, 0.001)
+	var current_index: int = int(round(rotation_degrees.y / step))
+	if current_index != last_haptic_index:
+		Input.vibrate_handheld(haptic_click_ms)
+		last_haptic_index = current_index
+
+func _stop_snap() -> void:
+	if snap_tween != null:
+		snap_tween.kill()
+	snap_tween = null
+
+func _get_camera_angle_xz(default_angle: float = PI / 2.0) -> float:
+	var cam = get_viewport().get_camera_3d()
+	var cam_angle = default_angle
+	if cam:
+		var to_cam = cam.global_position - global_position
+		to_cam.y = 0.0
+		if to_cam.length_squared() > 0.0001:
+			cam_angle = atan2(to_cam.z, to_cam.x)
+	return cam_angle
+
+func focus_item_face_to_camera(item_node: Node3D, duration: float = 0.35, force: bool = false) -> void:
+	if is_level_finished:
+		return
+	if item_node == null or not is_instance_valid(item_node):
+		return
+	var cell = item_node.get_parent()
+	if cell == null or not is_instance_valid(cell):
+		return
+	
+	var cell_pos = cell.global_position - global_position
+	cell_pos.y = 0.0
+	if cell_pos.length_squared() <= 0.0001:
+		return
+	
+	var col_world_angle = atan2(cell_pos.z, cell_pos.x)
+	var cam_angle = _get_camera_angle_xz()
+	var diff = wrapf(col_world_angle - cam_angle, -PI, PI)
+	
+	if not force and abs(diff) < deg_to_rad(8.0):
+		return
+	# При force=true всё равно не трогаем шкаф если он уже точно смотрит в камеру
+	if abs(diff) < deg_to_rad(0.5):
+		return
+
+	_stop_snap()
+	if focus_tween and focus_tween.is_running():
+		focus_tween.kill()
+	angular_velocity = 0.0
+	var target_deg: float = rad_to_deg(rotation.y + diff)
+	focus_tween = create_tween().set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+	focus_tween.tween_property(self, "rotation_degrees:y", target_deg, duration)
+	focus_tween.finished.connect(func(): current_rotation_y = rotation_degrees.y)
+
+func build_cabinet_tornado() -> void:
+	is_level_finished = false
+	for child in get_children():
+		child.hide() # Спрятать перед удалением
+		child.queue_free()
+		
+	show()
+	can_rotate = false
+	active_red_cells.clear()
+	unlocked_coin_cols.clear()
+	_is_first_bonus_reveal = true
+	_reward_session_id += 1
+	_no_bonus_close_pending = false
+
+	var spawn_list = []
+	for order_item in ItemManager.current_order:
+		spawn_list.append(order_item["id"])
+	if spawn_list == null or spawn_list.is_empty():
+		printerr("build_cabinet_tornado: spawn_list пуст. Проверь генерацию заказа и загрузку items_db.")
+		return
+
+	var all_ids = ItemManager.items_db.keys()
+	if all_ids == null or all_ids.is_empty():
+		printerr("build_cabinet_tornado: items_db пуст (all_ids пуст). Проверь пути/регистр в Items/Data и ресурсы .tres.")
+		return
+	while spawn_list.size() < (ROWS * COLUMNS):
+		spawn_list.append(all_ids[randi() % all_ids.size()])
+	spawn_list.shuffle()
+	
+	var all_indices = []
+	for i in range(ROWS * COLUMNS): all_indices.append(i)
+	all_indices.shuffle()
+	var bonus_indices = all_indices.slice(0, 3)
+	
+	var tangential_max_width = 2.0 * BLENDER_RADIUS * tan(STEP_ANGLE / 2.0)
+	var target_scale_x = (tangential_max_width / manual_mesh_width) * width_scale
+	var final_radial_position = BLENDER_RADIUS + geometric_radial_offset
+	var total_assembly_time = (ROWS * delay_between_rows) + (COLUMNS * delay_between_cells_in_row) + cell_fly_duration
+	
+	current_rotation_y = 0.0
+	rotation_degrees.y = 0.0
+	last_haptic_index = 0
+
+	var cabinet_tween = create_tween()
+	cabinet_tween.tween_property(self, "rotation_degrees:y", total_rotation_degrees, total_assembly_time)\
+		.set_trans(trans_type).set_ease(ease_type)
+	cabinet_tween.finished.connect(func():
+		can_rotate = true
+		current_rotation_y = rotation_degrees.y
+	)
+	
+	for row in range(ROWS):
+		var current_row_delay = row * delay_between_rows
+		var row_y = float(row) * CELL_HEIGHT * VERTICAL_SPACING
+		
+		for i in range(COLUMNS):
+			var current_index = row * COLUMNS + i
+			var is_red = current_index in bonus_indices
+			
+			var angle: float = float(i) * STEP_ANGLE
+			var target_pos := Vector3(cos(angle) * final_radial_position, row_y, sin(angle) * final_radial_position)
+
+			var cell
+			if is_red:
+				cell = red_cell_scene.instantiate()
+				active_red_cells.append({"cell": cell, "col": i})
+				# В красную ячейку предмет НЕ добавляем! Монетка там уже есть по умолчанию.
+			else:
+				cell = green_cell_scene.instantiate()
+				# В зелёную ячейку добавляем предмет
+				var item_node = item_3d_scene.instantiate()
+				cell.add_child(item_node)
+				var sid: int = spawn_list[current_index]
+				item_node.setup(sid)
+				item_node.set_meta("puzzle_shape", ItemManager.get_shape_for_instance(sid))
+				item_node.position = Vector3(0, 0, 0.1)
+				
+			add_child(cell)
+			
+			cell.scale = Vector3(0.001, 0.001, 0.001)
+			
+			var random_spawn_dist = randf_range(spawn_distance_min, spawn_distance_max)
+			var spawn_radius = final_radial_position + random_spawn_dist
+			cell.position = Vector3(cos(angle) * spawn_radius, row_y, sin(angle) * spawn_radius)
+			cell.rotation = Vector3(0, -angle, 0)
+			
+			var individual_delay = current_row_delay + (i * delay_between_cells_in_row)
+			var t = create_tween().set_parallel(true)
+			t.tween_property(cell, "position", target_pos, cell_fly_duration)\
+				.set_trans(trans_type).set_ease(ease_type).set_delay(individual_delay)
+			t.tween_property(cell, "scale", Vector3(target_scale_x, 1.0, 1.0), cell_fly_duration)\
+				.set_trans(trans_type).set_ease(ease_type).set_delay(individual_delay)
+
+	_place_caps_sync(total_assembly_time)
+
+	_bonus_red_cell_count = active_red_cells.size()
+
+func reveal_next_bonus_cell(callback: Callable):
+	if active_red_cells.size() == 0:
+		callback.call()
+		# Нет красных ячеек с монетами — on_coin_collected никогда не опустит список, сигнал не придёт.
+		if _bonus_red_cell_count == 0:
+			_schedule_all_bonus_coins_collected_no_coins()
+		return
+		
+	var data = active_red_cells.pop_front()
+	var cell = data["cell"]
+	var col: int = data["col"]
+	
+	_stop_snap()
+	# Убиваем focus tween — иначе он будет конфликтовать с поворотом кинематики
+	if focus_tween and focus_tween.is_running():
+		focus_tween.kill()
+	can_rotate = false
+	is_dragging = false
+	angular_velocity = 0.0
+	
+	# Угол камеры относительно центра шкафа в XZ-плоскости.
+	var cam_angle = _get_camera_angle_xz()
+	
+	# Ячейка col стоит на цилиндре под локальным углом col * STEP_ANGLE.
+	# При rotation.y = R мировой угол ячейки = col_angle - R (из матрицы поворота Godot).
+	# Приравниваем к cam_angle: col_angle - R = cam_angle => R = col_angle - cam_angle.
+	var target_rot = float(col) * STEP_ANGLE - cam_angle
+	var diff = angle_difference(rotation.y, target_rot)
+	
+	if abs(diff) < deg_to_rad(5.0):
+		diff += TAU
+	
+	var final_angle_rad: float = rotation.y + diff
+	var final_deg: float = rad_to_deg(final_angle_rad)
+
+	var extra_spin: float = 0.0
+	if _is_first_bonus_reveal:
+		extra_spin = 360.0 if diff >= 0 else -360.0
+		_is_first_bonus_reveal = false
+
+	var juicy_final_deg: float = final_deg + extra_spin
+
+	var reveal_duration: float = 1.0 / bonus_reveal_speed_multiplier
+	var post_open_delay: float = 0.6 / (bonus_reveal_speed_multiplier * bonus_post_open_delay_multiplier)
+	if bonus_fixed_post_open_delay >= 0.0:
+		post_open_delay = bonus_fixed_post_open_delay
+
+	var tw := create_tween().set_trans(Tween.TRANS_QUART).set_ease(Tween.EASE_IN_OUT)
+	tw.tween_property(self, "rotation_degrees:y", juicy_final_deg, reveal_duration)
+	tw.tween_callback(func():
+		current_rotation_y = rotation_degrees.y
+		rotation_degrees.y = fmod(rotation_degrees.y, 360.0)
+		current_rotation_y = rotation_degrees.y
+
+		if is_instance_valid(cell):
+			cell.set_meta("cabinet_col", col)
+			_register_coin_col(col)
+			if cell.has_method("open_doors"):
+				cell.open_doors()
+
+		get_tree().create_timer(post_open_delay).timeout.connect(func():
+			can_rotate = true
+			angular_velocity = 0.0
+			current_rotation_y = rotation_degrees.y
+			callback.call()
+		)
+	)
+
+func _place_caps_sync(duration: float) -> void:
+	if cap_scene == null: return
+	var s_xz = BLENDER_RADIUS / CAP_FIT_RADIUS
+	var cap_scale = Vector3(s_xz, 1.0, s_xz)
+	var t = create_tween().set_parallel(true)
+
+	var bottom = cap_scene.instantiate() as Node3D
+	add_child(bottom)
+	bottom.scale = Vector3(0.001, 0.001, 0.001)
+	bottom.position = Vector3(0.0, CAP_BOTTOM_Y - 15.0, 0.0)
+	t.tween_property(bottom, "position", Vector3(0.0, CAP_BOTTOM_Y, 0.0), duration).set_trans(trans_type).set_ease(ease_type)
+	t.tween_property(bottom, "scale", cap_scale, duration).set_trans(trans_type).set_ease(ease_type)
+
+	var top = cap_scene.instantiate() as Node3D
+	add_child(top)
+	top.scale = Vector3(0.001, 0.001, 0.001)
+	var top_y = (float(ROWS - 1) * CELL_HEIGHT * VERTICAL_SPACING) + CELL_HEIGHT + CAP_TOP_Y_MARGIN
+	top.position = Vector3(0.0, top_y + 15.0, 0.0)
+	t.tween_property(top, "position", Vector3(0.0, top_y, 0.0), duration).set_trans(trans_type).set_ease(ease_type)
+	t.tween_property(top, "scale", cap_scale, duration).set_trans(trans_type).set_ease(ease_type)
+
+# =============================================================
+# ПОСЛЕДОВАТЕЛЬНОСТЬ СБОРА МОНЕТ (всегда слева направо)
+# =============================================================
+
+func _schedule_all_bonus_coins_collected_no_coins() -> void:
+	if _no_bonus_close_pending:
+		return
+	_no_bonus_close_pending = true
+	var session := _reward_session_id
+	_no_bonus_complete_timer = get_tree().create_timer(0.2)
+	_no_bonus_complete_timer.timeout.connect(func():
+		_no_bonus_complete_timer = null
+		_no_bonus_close_pending = false
+		if session != _reward_session_id:
+			return
+		if is_instance_valid(self):
+			is_level_finished = true
+			can_rotate = false
+			angular_velocity = 0.0
+			all_rewards_collected_visually.emit()
+			all_bonus_coins_collected.emit()
+	)
+
+# Регистрируем открытую ячейку с монетой в порядке колонок
+func _register_coin_col(col: int) -> void:
+	if not col in unlocked_coin_cols:
+		unlocked_coin_cols.append(col)
+		unlocked_coin_cols.sort()  # Сортируем по возрастанию → слева направо
+
+# Вызывается из coin_3d.gd в начале сбора монеты (до полёта); здесь же учитываем +1 к летящим.
+# Следующей всегда становится ячейка ПРАВЕЕ собранной (по возрастанию колонки),
+# а если правее ничего нет — переходим к крайней левой из оставшихся.
+func on_coin_collected(col: int) -> void:
+	var idx := unlocked_coin_cols.find(col)
+	if idx < 0:
+		return  # Монетка уже не в списке — ничего не делаем
+	unlocked_coin_cols.remove_at(idx)
+	_coins_in_flight += 1
+
+	if unlocked_coin_cols.is_empty():
+		can_rotate = true
+		angular_velocity = 0.0
+		return
+
+	# После удаления idx указывает ровно на следующую правую ячейку.
+	# Если были в конце списка — % оборачивает к крайней левой.
+	var next_col: int = unlocked_coin_cols[idx % unlocked_coin_cols.size()]
+	_rotate_to_coin_col(next_col)
+
+# Поворот к грани с монетой — всегда в положительном направлении (слева направо)
+func _rotate_to_coin_col(next_col: int) -> void:
+	can_rotate = false
+	_stop_snap()
+	if focus_tween and focus_tween.is_running(): focus_tween.kill()
+	if coin_seq_tween and coin_seq_tween.is_running(): coin_seq_tween.kill()
+	angular_velocity = 0.0
+
+	var cam_angle := _get_camera_angle_xz()
+	var target_rot := float(next_col) * STEP_ANGLE - cam_angle
+
+	# Положительный поворот (слева направо): используем wrapf в [0, TAU).
+	var diff := wrapf(target_rot - rotation.y, 0.0, TAU)
+	# Если уже смотрим на эту монетку — не крутим, игрок сразу видит её.
+	if diff < deg_to_rad(3.0):
+		return
+
+	var target_coin_deg: float = rad_to_deg(rotation.y + diff)
+	coin_seq_tween = create_tween().set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
+	coin_seq_tween.tween_property(self, "rotation_degrees:y", target_coin_deg, 0.7)
+	coin_seq_tween.finished.connect(func(): current_rotation_y = rotation_degrees.y)
+
+
+func _on_bonus_coin_flight_finished() -> void:
+	_coins_in_flight = maxi(_coins_in_flight - 1, 0)
+
+	if _coins_in_flight == 0 and unlocked_coin_cols.is_empty() and active_red_cells.is_empty():
+		if is_instance_valid(self):
+			is_level_finished = true
+			can_rotate = false
+			angular_velocity = 0.0
+			all_rewards_collected_visually.emit()
+			all_bonus_coins_collected.emit()
+
+
+================================================================================
+FILE: res://Scenes/main_scene.gd
+================================================================================
+
+extends Node3D
+
+@onready var order_popup = $UILayer/Order_PopUp
+@onready var env_back = $UILayer/Order_PopUp/EnvelopeBack
+@onready var env_front = $UILayer/Order_PopUp/EnvelopeFront
+@onready var letter = $UILayer/Order_PopUp/LetterContainer
+@onready var start_button = $UILayer/Start_Button
+@onready var ready_button = $UILayer/Ready_Button
+@onready var timer_label = $UILayer/Order_PopUp/LetterContainer/LetterPaper/Timer
+@onready var side_widget = $UILayer/SideWidget
+@onready var backpack_widget = $UILayer/BackpackWidget
+@onready var drag_preview = $UILayer/DragPreview
+@onready var autofill_button = get_node_or_null("UILayer/AutofillButton")
+
+@export_group("Ссылки на объекты")
+@export var cabinet: Node3D
+
+@export_group("Настройки Времени")
+@export var total_time: float = 10.0
+
+@export_group("Конверт (Envelope)")
+@export var env_intro_fade: float = 0.2
+@export var env_intro_start_y: float = 2300.0
+@export var env_intro_end_y: float = 1800.0
+@export var env_intro_duration: float = 1.0
+@export var env_intro_trans: Tween.TransitionType = Tween.TRANS_CIRC
+@export var env_intro_ease: Tween.EaseType = Tween.EASE_OUT
+@export var env_outro_fade: float = 0.3
+@export var env_outro_end_y: float = 2300.0
+@export var env_outro_duration: float = 0.8
+@export var env_outro_trans: Tween.TransitionType = Tween.TRANS_CIRC
+@export var env_outro_ease: Tween.EaseType = Tween.EASE_IN
+
+@export_group("Письмо (Letter)")
+@export var let_intro_delay: float = 0.3
+@export var let_intro_fade: float = 0.2
+@export var let_intro_start_y: float = -2000.0
+@export var let_intro_end_y: float = 500.0 
+@export var let_intro_start_scale_y: float = 0.1
+@export var let_intro_end_scale_y: float = 1.0
+@export var let_intro_duration: float = 0.5
+@export var let_intro_trans: Tween.TransitionType = Tween.TRANS_CIRC
+@export var let_intro_ease: Tween.EaseType = Tween.EASE_OUT
+@export var let_outro_delay: float = 0.0
+@export var let_outro_fade: float = 0.3
+@export var let_outro_end_y: float = -2000.0
+@export var let_outro_start_scale_y: float = 1.0
+@export var let_outro_end_scale_y: float = 0.5
+@export var let_outro_duration: float = 0.5
+@export var let_outro_trans: Tween.TransitionType = Tween.TRANS_CIRC
+@export var let_outro_ease: Tween.EaseType = Tween.EASE_IN
+
+var time_left: float
+var is_timer_active: bool = false
+var is_game_started: bool = false
+
+var potential_drag_id: int = -1
+var potential_drag_tex: String = ""
+var potential_drag_node: Node3D = null 
+var current_drag_node: Node3D = null   
+var drag_start_pos: Vector2 = Vector2.ZERO
+const DRAG_THRESHOLD: float = 15.0 
+
+var cinematic_queue: int = 0
+var is_cinematic_playing: bool = false
+var is_autofill_animating: bool = false
+var fast_cinematic_count: int = 0
+var autofill_cab_tween: Tween
+
+func _ready():
+	if start_button: start_button.pressed.connect(_on_start_pressed)
+	if ready_button: ready_button.pressed.connect(_on_ready_pressed)
+	if autofill_button:
+		autofill_button.pressed.connect(_on_autofill_pressed)
+		autofill_button.hide()
+	
+	ready_button.modulate.a = 0.0; ready_button.hide()
+	env_back.modulate.a = 0.0; env_front.modulate.a = 0.0; letter.modulate.a = 0.0
+	
+	if side_widget: side_widget.hide()
+	if backpack_widget: backpack_widget.hide()
+	if drag_preview: drag_preview.hide()
+	if cabinet: cabinet.hide()
+
+	if cabinet:
+		cabinet.all_rewards_collected_visually.connect(_on_all_rewards_collected_visually)
+
+	ItemManager.item_pressed.connect(_on_item_pressed)
+
+	ItemManager.perfect_clear_achieved.connect(_on_perfect_clear)
+	ItemManager.level_completed.connect(func(): print("Level finished!"))
+	ItemManager.combo_broken.connect(_on_combo_broken)
+
+func _on_all_rewards_collected_visually() -> void:
+	if backpack_widget and backpack_widget.has_method("start_order_completed_sequence"):
+		backpack_widget.start_order_completed_sequence()
+
+func _on_combo_broken() -> void:
+	if side_widget and side_widget.has_node("ComboWidget"):
+		var cw = side_widget.get_node("ComboWidget")
+		if cw.has_method("show_fail"):
+			cw.show_fail()
+
+func _on_perfect_clear() -> void:
+	if is_autofill_animating:
+		while is_autofill_animating:
+			await get_tree().process_frame
+
+	var popup: Control = load("res://Scenes/perfect_popup.gd").new() as Control
+	popup.z_index = 400
+	$UILayer.add_child(popup)
+	popup.set_anchors_preset(Control.PRESET_FULL_RECT)
+	popup.play_animation(func():
+		cinematic_queue = 3
+		_play_next_cinematic()
+	)
+
+	# Нет шкафа — сигнала all_rewards_collected_visually не будет; взлёт через 1с после появления Perfect
+	if cabinet == null:
+		get_tree().create_timer(1.0).timeout.connect(_on_all_rewards_collected_visually)
+
+func _process(delta):
+	if is_timer_active and time_left > 0:
+		time_left -= delta
+		if timer_label: timer_label.text = str(ceil(time_left)) + "s"
+		if time_left <= 0: _on_timer_timeout()
+			
+	if cinematic_queue > 0 and not is_cinematic_playing and not ItemManager.is_dragging_item and not is_autofill_animating:
+		_play_next_cinematic()
+
+func _play_next_cinematic():
+	is_cinematic_playing = true
+	cinematic_queue -= 1
+	if cabinet and cabinet.has_method("reveal_next_bonus_cell"):
+		var use_fast = fast_cinematic_count > 0
+		if use_fast:
+			fast_cinematic_count -= 1
+		if cabinet.has_method("set_bonus_reveal_speed_multiplier"):
+			cabinet.set_bonus_reveal_speed_multiplier(2.0 if use_fast else 1.0)
+		if cabinet.has_method("set_bonus_post_open_delay_multiplier"):
+			cabinet.set_bonus_post_open_delay_multiplier(2.0 if use_fast else 1.0)
+		if cabinet.has_method("set_bonus_fixed_post_open_delay"):
+			cabinet.set_bonus_fixed_post_open_delay(0.25 if use_fast else -1.0)
+		cabinet.reveal_next_bonus_cell(func(): is_cinematic_playing = false)
+	else:
+		is_cinematic_playing = false
+
+func _find_cabinet_item_node(parent_node: Node, target_id: int, ignore_list: Array = []) -> Node3D:
+	if parent_node == null:
+		return null
+	if not parent_node in ignore_list:
+		if "id" in parent_node and parent_node.get("id") == target_id: return parent_node as Node3D
+		if "item_id" in parent_node and parent_node.get("item_id") == target_id: return parent_node as Node3D
+	for child in parent_node.get_children():
+		var found = _find_cabinet_item_node(child, target_id, ignore_list)
+		if found: return found
+	return null
+
+func _on_autofill_pressed():
+	if not is_game_started or not backpack_widget or is_cinematic_playing or is_autofill_animating: return
+	if ItemManager.is_dragging_item or backpack_widget.is_dragging_internal: return
+
+	# СОБИРАЕМ РЕАЛЬНЫЕ ДАННЫЕ ИЗ ШКАФА
+	var required_data = []
+	var used_cab_nodes = []
+	for task in ItemManager.current_order:
+		if not task["found"]:
+			var id = task["id"]
+			var cab_node = _find_cabinet_item_node(cabinet, id, used_cab_nodes)
+			var actual_shape = []
+
+			# Берем сгенерированную форму прямо из 3D-предмета
+			if cab_node and cab_node.has_meta("puzzle_shape"):
+				actual_shape = cab_node.get_meta("puzzle_shape")
+				used_cab_nodes.append(cab_node)
+			else:
+				actual_shape = ItemManager.items_db[id].get("shape", [Vector2.ZERO])
+
+			required_data.append({
+				"id": id,
+				"shape": actual_shape,
+				"cab_node": cab_node
+			})
+
+	if required_data.size() == 0: return
+
+	# ПЕРЕДАЕМ РЕАЛЬНЫЕ ДАННЫЕ В РЮКЗАК
+	var placements = backpack_widget.auto_fill_and_optimize(required_data)
+	if placements.size() == 0: return
+
+	is_autofill_animating = true
+
+	var fly_data_array = []
+	for place_data in placements:
+		var cab_node = place_data["cab_node"]
+		fly_data_array.append({
+			"id": place_data["id"],
+			"cell": place_data["cell"],
+			"cab_node": cab_node,
+			"start_y": cab_node.global_position.y if cab_node else -9999.0
+		})
+		if cab_node and is_instance_valid(cab_node) and is_instance_valid(place_data["cell"]):
+			place_data["cell"].set_meta("source_drag_node", cab_node)
+
+	fly_data_array.sort_custom(func(a, b): return a["start_y"] > b["start_y"])
+
+	var total_anim_time = 1.0 + (fly_data_array.size() * 0.15)
+	if cabinet:
+		if autofill_cab_tween and autofill_cab_tween.is_running():
+			autofill_cab_tween.kill()
+		autofill_cab_tween = create_tween().set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
+		autofill_cab_tween.tween_property(cabinet, "rotation_degrees:y", cabinet.rotation_degrees.y + 720.0, total_anim_time)
+
+	var cam = get_viewport().get_camera_3d()
+	var queue_before = cinematic_queue
+	for i in range(fly_data_array.size()):
+		var data = fly_data_array[i]
+		var id = data["id"]; var target_cell = data["cell"]; var cab_node = data["cab_node"]
+
+		ItemManager.mark_item_as_found(id)
+
+		var target_pos = target_cell.global_position
+		var target_rot = target_cell.get_meta("rot_deg", 0)
+		var target_shape = target_cell.get_meta("current_shape")
+
+		# Генерируем полноценный паззл через рюкзак
+		var fly_icon = backpack_widget.create_standalone_puzzle_visual(id, target_shape, target_rot)
+		fly_icon.z_index = 100
+		fly_icon.modulate.a = 0.0
+		$UILayer.add_child(fly_icon)
+
+		var start_tw = create_tween()
+		start_tw.tween_interval(i * 0.15)
+		start_tw.tween_callback(func():
+			var start_pos = get_viewport().get_visible_rect().size / 2.0
+			if cab_node:
+				if cab_node.has_method("hide_item"): cab_node.hide_item()
+				else: cab_node.hide()
+				if cam: start_pos = cam.unproject_position(cab_node.global_position)
+
+			fly_icon.global_position = start_pos - (fly_icon.size / 2.0)
+			fly_icon.scale = Vector2(0.2, 0.2) # Вылетает маленьким из шкафа
+			fly_icon.modulate.a = 1.0
+
+			var anim_tw = create_tween().set_parallel(true).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
+			anim_tw.tween_property(fly_icon, "global_position", target_pos, 0.4)
+			anim_tw.tween_property(fly_icon, "scale", Vector2.ONE, 0.4)
+			# Вращение не нужно, так как форма паззла уже повернута правильно внутри контейнера
+
+			anim_tw.chain().tween_callback(func():
+				fly_icon.queue_free()
+				if is_instance_valid(target_cell):
+					# Снимаем флаг ожидания
+					target_cell.set_meta("hide_bg_until_land", false)
+
+					if target_cell.has_node("ItemIcon"):
+						target_cell.get_node("ItemIcon").show()
+
+					# ВАЖНО: Вызываем обновление визуала рюкзака, чтобы вернуть фон
+					if backpack_widget and backpack_widget.has_method("_update_grid_visuals"):
+						backpack_widget._update_grid_visuals()
+			)
+		)
+	var added_cinematics = cinematic_queue - queue_before
+	if added_cinematics > 0:
+		fast_cinematic_count += added_cinematics
+
+	if autofill_button:
+		var tw = create_tween().set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+		tw.tween_property(autofill_button, "modulate:a", 0.0, 0.3)
+		tw.tween_callback(autofill_button.hide)
+		
+	get_tree().create_timer(total_anim_time).timeout.connect(func(): is_autofill_animating = false)
+
+func _on_item_pressed(id: int, tex: String, node: Node3D):
+	if is_cinematic_playing: return
+	potential_drag_id = id; potential_drag_tex = tex; potential_drag_node = node
+	drag_start_pos = get_viewport().get_mouse_position()
+
+func _input(event):
+	if is_cinematic_playing: return 
+	
+	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and not event.pressed:
+		if potential_drag_id != -1:
+			if ItemManager.is_dragging_item: _perform_drop()
+			else: _reset_drag_instant() 
+
+	if event is InputEventMouseMotion and potential_drag_id != -1:
+		if not ItemManager.is_dragging_item:
+			var diff = event.position - drag_start_pos
+			if diff.length() > DRAG_THRESHOLD:
+				if abs(diff.y) > abs(diff.x): _start_drag() 
+				else: _reset_drag_instant() 
+		else:
+			if backpack_widget and backpack_widget.has_method("update_external_drag_preview"):
+				backpack_widget.update_external_drag_preview(event.position)
+
+func _start_drag():
+	ItemManager.is_dragging_item = true
+	current_drag_node = potential_drag_node
+	if cabinet and cabinet.has_method("focus_item_face_to_camera") and current_drag_node and not is_cinematic_playing:
+		cabinet.focus_item_face_to_camera(current_drag_node, 0.35)
+	if current_drag_node and current_drag_node.has_method("hide_item"): current_drag_node.hide_item()
+	if drag_preview: drag_preview.hide()
+	if backpack_widget and backpack_widget.has_method("show_external_drag_preview"):
+		var shape_to_draw: Array
+		if current_drag_node and current_drag_node.has_meta("puzzle_shape"):
+			shape_to_draw = current_drag_node.get_meta("puzzle_shape")
+		else:
+			shape_to_draw = ItemManager.items_db[potential_drag_id].get("shape", [Vector2.ZERO])
+		backpack_widget.show_external_drag_preview(
+			potential_drag_id,
+			get_viewport().get_mouse_position(),
+			shape_to_draw
+		)
+
+func _perform_drop():
+	var mouse_pos = get_viewport().get_mouse_position()
+	var dropped_successfully = false
+
+	if backpack_widget:
+		var forgiving_drop_zone = backpack_widget.get_global_rect().grow(200.0)
+		if forgiving_drop_zone.has_point(mouse_pos):
+			if backpack_widget.has_method("try_add_item"):
+				dropped_successfully = backpack_widget.try_add_item(potential_drag_id, mouse_pos, potential_drag_node)
+
+	if dropped_successfully:
+		current_drag_node = null
+		_reset_drag_instant()
+	else:
+		_fly_back_and_cancel()
+
+func _fly_back_and_cancel():
+	if autofill_cab_tween and autofill_cab_tween.is_running(): autofill_cab_tween.kill()
+	if backpack_widget and backpack_widget.has_method("hide_external_drag_preview"): backpack_widget.hide_external_drag_preview()
+	var node_to_return = current_drag_node
+	if node_to_return and is_instance_valid(node_to_return):
+		var tex_path = potential_drag_tex
+		var fly_icon = TextureRect.new()
+		fly_icon.texture = load(tex_path)
+		fly_icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		fly_icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+		fly_icon.size = fly_icon.texture.get_size() if fly_icon.texture else Vector2(100, 100)
+		fly_icon.pivot_offset = fly_icon.size / 2.0
+		fly_icon.global_position = get_viewport().get_mouse_position() - fly_icon.pivot_offset
+		fly_icon.z_index = 100
+		$UILayer.add_child(fly_icon)
+
+		if drag_preview: drag_preview.hide()
+
+		const FOCUS_DURATION := 0.2
+		if cabinet and cabinet.has_method("focus_item_face_to_camera") and node_to_return and not is_cinematic_playing:
+			cabinet.focus_item_face_to_camera(node_to_return, FOCUS_DURATION, true)
+
+		var local_fly_tween = create_tween().set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+		local_fly_tween.tween_interval(FOCUS_DURATION)
+		local_fly_tween.tween_callback(_run_fly_icon_return_after_focus.bind(fly_icon, node_to_return))
+	current_drag_node = null
+	potential_drag_id = -1; potential_drag_node = null; ItemManager.is_dragging_item = false
+
+func _reset_drag_instant():
+	potential_drag_id = -1; potential_drag_node = null; ItemManager.is_dragging_item = false; _hide_preview_only()
+
+func _hide_preview_only():
+	if backpack_widget and backpack_widget.has_method("hide_external_drag_preview"): backpack_widget.hide_external_drag_preview()
+	if drag_preview: drag_preview.hide(); drag_preview.texture = null
+	if current_drag_node and current_drag_node.has_method("show_item"): current_drag_node.show_item()
+	current_drag_node = null
+
+func _on_start_pressed():
+	start_button.hide()
+	ItemManager.generate_new_order()
+	if order_popup.has_method("fill_order_icons"): order_popup.fill_order_icons()
+	is_game_started = false; time_left = total_time
+	
+	order_popup.position.y = env_intro_start_y; letter.position.y = let_intro_start_y; letter.scale.y = let_intro_start_scale_y
+	var tween = create_tween().set_parallel(true)
+	tween.tween_property(order_popup, "position:y", env_intro_end_y, env_intro_duration).set_trans(env_intro_trans).set_ease(env_intro_ease)
+	tween.tween_property(env_back, "modulate:a", 1.0, env_intro_fade); tween.tween_property(env_front, "modulate:a", 1.0, env_intro_fade)
+	tween.tween_property(letter, "position:y", let_intro_end_y, let_intro_duration).set_trans(let_intro_trans).set_ease(let_intro_ease).set_delay(let_intro_delay)
+	tween.tween_property(letter, "scale:y", let_intro_end_scale_y, let_intro_duration).set_trans(let_intro_trans).set_ease(let_outro_ease).set_delay(let_intro_delay)
+	tween.tween_property(letter, "modulate:a", 1.0, let_intro_fade).set_delay(let_intro_delay)
+	
+	await get_tree().create_timer(let_intro_delay + let_intro_duration).timeout
+	if !is_game_started: ready_button.show(); create_tween().tween_property(ready_button, "modulate:a", 1.0, 0.2); is_timer_active = true
+
+func _on_ready_pressed():
+	if is_game_started: return
+	is_timer_active = false; start_game_flow()
+
+func _on_timer_timeout():
+	if is_game_started: return
+	is_timer_active = false; start_game_flow()
+
+func start_game_flow():
+	is_game_started = true; ready_button.disabled = true
+	if cabinet: cabinet.build_cabinet_tornado()
+	var outro = create_tween().set_parallel(true)
+	outro.tween_property(order_popup, "position:y", env_outro_end_y, env_outro_duration).set_trans(env_outro_trans).set_ease(env_outro_ease)
+	outro.tween_property(env_back, "modulate:a", 0.0, env_outro_fade); outro.tween_property(env_front, "modulate:a", 0.0, env_outro_fade)
+	outro.tween_property(letter, "position:y", let_outro_end_y, let_outro_duration).set_trans(let_outro_trans).set_ease(let_outro_ease).set_delay(let_outro_delay)
+	outro.tween_property(letter, "scale:y", let_outro_end_scale_y, let_outro_duration).set_trans(let_outro_trans).set_ease(let_outro_ease).set_delay(let_outro_delay)
+	outro.tween_property(letter, "modulate:a", 0.0, let_outro_fade).set_delay(let_outro_delay)
+	outro.tween_property(ready_button, "modulate:a", 0.0, let_outro_fade)
+	
+	outro.chain().tween_callback(ready_button.hide)
+	outro.chain().tween_callback(func():
+		if side_widget: side_widget.start_appear_animation()
+		if backpack_widget: backpack_widget.start_appear_animation()
+		if autofill_button: autofill_button.modulate.a = 1.0; autofill_button.show()
+	)
+
+func _run_fly_icon_return_after_focus(fly_icon: TextureRect, drag_node: Node3D) -> void:
+	var cam = get_viewport().get_camera_3d()
+	var target_pos = drag_start_pos - fly_icon.pivot_offset
+
+	if cam and drag_node and is_instance_valid(drag_node):
+		# ПРОВЕРКА НА ПОЗИЦИЮ ЗА КАМЕРОЙ
+		if cam.is_position_behind(drag_node.global_position):
+			fly_icon.queue_free()
+			if drag_node.has_method("show_item"): drag_node.show_item()
+			else: drag_node.show()
+			return
+
+		target_pos = cam.unproject_position(drag_node.global_position) - fly_icon.pivot_offset
+
+	var local_inner_tween = create_tween().set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+	local_inner_tween.tween_property(fly_icon, "global_position", target_pos, 0.3)
+	local_inner_tween.tween_callback(func():
+		fly_icon.queue_free()
+		if drag_node and is_instance_valid(drag_node):
+			if drag_node.has_method("show_item"): drag_node.show_item()
+			else: drag_node.show()
+	)
+
+func fly_back_to_cabinet(item_id: int, start_pos: Vector2, drag_node: Node3D, skip_unmark: bool = false):
+	const FOCUS_DURATION := 0.2
+	if item_id == -1: ItemManager.is_dragging_item = false; return
+
+	# Пропускаем снятие флага, если это делает Autofill (очистка мусора)
+	if not skip_unmark:
+		ItemManager.unmark_item_as_found(item_id)
+
+	if autofill_cab_tween and autofill_cab_tween.is_running(): autofill_cab_tween.kill()
+	ItemManager.is_dragging_item = false
+	if not ItemManager.items_db.has(item_id):
+		if drag_node and is_instance_valid(drag_node):
+			if drag_node.has_method("show_item"): drag_node.show_item()
+			else: drag_node.show()
+		return
+	var tex_path = ItemManager.items_db[item_id]["texture"]
+	var fly_icon = TextureRect.new()
+	fly_icon.texture = load(tex_path)
+	fly_icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	fly_icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	fly_icon.size = fly_icon.texture.get_size() if fly_icon.texture else Vector2(100, 100)
+	fly_icon.pivot_offset = fly_icon.size / 2.0
+	fly_icon.global_position = start_pos - fly_icon.pivot_offset
+	fly_icon.z_index = 100
+	$UILayer.add_child(fly_icon)
+
+	if drag_preview: drag_preview.hide()
+
+	if cabinet and cabinet.has_method("focus_item_face_to_camera") and drag_node and not is_cinematic_playing:
+		cabinet.focus_item_face_to_camera(drag_node, FOCUS_DURATION, true)
+
+	var local_fly_tween = create_tween().set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+	local_fly_tween.tween_interval(FOCUS_DURATION)
+	local_fly_tween.tween_callback(_run_fly_icon_return_after_focus.bind(fly_icon, drag_node))
+
+================================================================================
+FILE: res://Scenes/backpack_widget.gd
+================================================================================
+
 extends Control
 
 signal cascade_finished
@@ -104,11 +1288,8 @@ func _update_edit_mode_targets() -> void:
 		target_bg_pos = (view_size / 2.0) + Vector2(0, final_flight_y_offset)
 		target_bg_scale = Vector2(1.1, 1.1)
 	elif ItemManager.is_edit_mode:
-		# ВОЗВРАЩАЕМ СТАБИЛЬНУЮ ЛОГИКУ:
-		# Рюкзак приподнимается на величину magnet_max_offset от своей стартовой глобальной позиции,
-		# а не летит в абсолютный центр экрана.
-		target_bg_pos = original_bg_pos + Vector2(0.0, -magnet_max_offset)
-		target_bg_scale = original_bg_scale * magnet_scale_bump
+		target_bg_pos = view_size / 2.0
+		target_bg_scale = Vector2(1.1, 1.1)
 	else:
 		target_bg_pos = original_bg_pos
 		target_bg_scale = original_bg_scale
