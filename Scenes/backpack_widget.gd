@@ -28,6 +28,12 @@ const BACKPACK_CLOSING_SCENE = preload("res://Scenes/backpack_closing_sequence.t
 # НОВАЯ ПЕРЕМЕННАЯ:
 @export var final_flight_y_offset: float = 600.0 # Стартуем с бОльшего значения
 
+@export_group("Crossfade Timings")
+@export var bg_fade_out_delay: float = 0.1
+@export var bg_fade_out_duration: float = 0.4
+@export var seq_fade_in_delay: float = 0.0
+@export var seq_fade_in_duration: float = 0.4
+
 var is_order_completed = false
 var closing_sequence_node = null
 var is_cascading: bool = false
@@ -1356,7 +1362,10 @@ func start_order_completed_sequence() -> void:
 	closing_sequence_node.global_position = bg_center - seq_offset + seq_visual_offset
 
 	var start_center = backpack_bg.global_position + (backpack_bg.size * backpack_bg.scale / 2.0)
-	var target_center = (get_viewport_rect().size / 2.0) + Vector2(0, final_flight_y_offset)
+	var view_size = get_viewport_rect().size
+
+	# Блокируем ось X (берем start_center.x), меняем только Y (высоту полета)
+	var target_center = Vector2(start_center.x, (view_size.y / 2.0) + final_flight_y_offset)
 	var start_scale = backpack_bg.scale
 	var target_scale = Vector2(1.1, 1.1)
 
@@ -1370,9 +1379,14 @@ func start_order_completed_sequence() -> void:
 		0.95
 	).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_IN_OUT)
 
-	fade_tw.tween_property(grid, "modulate:a", 0.0, 0.3).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
-	fade_tw.tween_property(closing_sequence_node, "modulate:a", 1.0, 0.4).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
-	fade_tw.tween_property(backpack_bg, "modulate:a", 0.0, 0.4).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT).set_delay(0.1)
+	# Затухание сетки (синхронизируем с исчезновением подложки старого рюкзака)
+	fade_tw.tween_property(grid, "modulate:a", 0.0, bg_fade_out_duration).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT).set_delay(bg_fade_out_delay)
+
+	# Проявление 3D-модели (закрывающийся рюкзак)
+	fade_tw.tween_property(closing_sequence_node, "modulate:a", 1.0, seq_fade_in_duration).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT).set_delay(seq_fade_in_delay)
+
+	# Затухание старой 2D-подложки (обычный рюкзак)
+	fade_tw.tween_property(backpack_bg, "modulate:a", 0.0, bg_fade_out_duration).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT).set_delay(bg_fade_out_delay)
 
 	fade_tw.chain().tween_callback(func():
 		if closing_sequence_node:
