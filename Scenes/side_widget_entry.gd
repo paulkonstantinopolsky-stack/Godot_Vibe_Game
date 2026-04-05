@@ -18,9 +18,22 @@ func flip_to_front():
 	if current_tw and current_tw.is_running():
 		current_tw.kill()
 
-	current_tw = create_tween().set_ease(Tween.EASE_IN_OUT).set_trans(Tween.TRANS_QUAD)
+	current_tw = create_tween().bind_node(self).set_ease(Tween.EASE_IN_OUT).set_trans(Tween.TRANS_QUAD)
 
 	current_tw.tween_property(back, "scale:x", 0.0, 0.15)
 	current_tw.tween_callback(back.hide)
 	current_tw.tween_callback(front.show)
 	current_tw.tween_property(front, "scale:x", 1.0, 0.15)
+
+func flip_to_back():
+	if current_tw and current_tw.is_running():
+		current_tw.kill()
+
+	current_tw = create_tween().bind_node(self).set_ease(Tween.EASE_IN_OUT).set_trans(Tween.TRANS_QUAD)
+
+	current_tw.tween_property(front, "scale:x", 0.0, 0.15)
+	current_tw.tween_callback(func():
+		front.hide()
+		back.show()
+	)
+	current_tw.tween_property(back, "scale:x", 1.0, 0.15)

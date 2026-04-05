@@ -1,5 +1,7 @@
 extends Node
 
+signal item_unfound(id: int)
+
 var items_db = {}
 var current_order = []
 
@@ -76,37 +78,65 @@ func load_items_from_data():
 		file_name = dir.get_next()
 	print("БАЗА ПРЕДМЕТОВ ЗАГРУЖЕНА: ", items_db.size(), " объектов")
 
-func mark_item_as_found(item_id: int):
-	if item_id == -1: return
+	# Кэшируем текстуры при старте игры, чтобы избежать фризов от load() во время геймплея
+	for item_id in items_db.keys():
+		if items_db[item_id].has("texture"):
+			var tp: String = items_db[item_id]["texture"]
+			if tp != "":
+				items_db[item_id]["texture_res"] = load(tp)
+			else:
+				items_db[item_id]["texture_res"] = null
 
-	var is_part_of_order = false
+func reset_level_state() -> void:
+	is_dragging_item = false
+	is_edit_mode = false
+	combo_score = 0
+	combo_failed = false
 
+func mark_item_as_found(id: int) -> bool:
+	var is_correct = false
 	for item in current_order:
-		if item["id"] == item_id and not item["found"]:
-			is_part_of_order = true
-			item["found"] = true
-			if not combo_failed:
-				combo_score += 1
-			item_found.emit(item_id)
-			break
+		if item["id"] == id:
+			if not item["found"]:
+				item["found"] = true
+				is_correct = true
 
-	if not is_part_of_order:
-		var is_already_packed = false
-		for item in current_order:
-			if item["id"] == item_id and item["found"]:
-				is_already_packed = true
-				break
-		if not is_already_packed:
-			if not combo_failed:
-				combo_failed = true
-				combo_broken.emit()
+				# Начисляем очки только если комбо еще живо
+				if not combo_failed:
+					combo_score += 1
 
-	var all_found = true
+				item_found.emit(id)
+				_check_order_completion()
+				return true
+
+	# Правило: Игрок положил НЕВЕРНЫЙ предмет.
+	# Если комбо еще было живо — убиваем его навсегда и один раз сигнализируем об этом.
+	if not is_correct and not combo_failed:
+		combo_failed = true
+		combo_score = 0
+		combo_broken.emit()
+
+	return false
+
+func unmark_item_as_found(id: int) -> void:
+	for item in current_order:
+		if item["id"] == id:
+			if item["found"]:
+				item["found"] = false
+
+				# Откатываем счетчик только если комбо еще живо
+				if not combo_failed:
+					combo_score = maxi(0, combo_score - 1)
+
+				item_unfound.emit(id)
+			return
+
+func _check_order_completion() -> void:
+	var all_found := true
 	for item in current_order:
 		if not item["found"]:
 			all_found = false
 			break
-
 	if all_found:
 		level_completed.emit()
 		if not combo_failed:
@@ -226,13 +256,3 @@ func _rotate_shape_norm(shape: Array, rot: int) -> Array:
 		for p in temp:
 			result.append(p - Vector2(min_x, min_y))
 	return result
-
-func unmark_item_as_found(item_id: int):
-	for item in current_order:
-		if item["id"] == item_id and item["found"]:
-			item["found"] = false
-			combo_score = max(0, combo_score - 1)
-			if not combo_failed:
-				combo_failed = true
-				combo_broken.emit()
-			break

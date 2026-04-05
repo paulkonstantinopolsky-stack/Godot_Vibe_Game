@@ -344,7 +344,7 @@ func auto_fill_and_optimize(new_items_data: Array) -> Array:
 
 func _play_autofill_cascade_animation() -> void:
 	is_cascading = true
-	var cell_tween: Tween = create_tween()
+	var cell_tween: Tween = create_tween().bind_node(self)
 	cell_tween.set_parallel(true)
 
 	var delay: float = 0.0
@@ -476,7 +476,7 @@ func _shake_item(root_cell: Control) -> void:
 		var old_tw = root_cell.get_meta("shake_tween")
 		if old_tw and old_tw.is_valid():
 			old_tw.kill()
-	var tw = create_tween().set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
+	var tw = create_tween().bind_node(self).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
 	root_cell.set_meta("shake_tween", tw)
 	tw.tween_property(icon, "rotation_degrees", orig_rot + 15, 0.05)
 	tw.tween_property(icon, "rotation_degrees", orig_rot - 15, 0.1)
@@ -638,7 +638,7 @@ func build_drag_preview(item_id: int, shape: Array, rot_deg: int = 0):
 		drag_preview_container.add_child(panel)
 
 	var icon = TextureRect.new()
-	icon.texture = load(ItemManager.items_db[item_id]["texture"])
+	icon.texture = ItemManager.items_db[item_id].get("texture_res")
 	icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 	drag_preview_container.add_child(icon)
@@ -935,9 +935,8 @@ func _can_place_shape(root_cell: Control, shape: Array, ignore_active: bool = fa
 	return true
 
 func _place_item_in_grid(root_cell: Control, item_id: int, shape: Array, rot_deg: int):
-	var tex_path = ItemManager.items_db[item_id]["texture"]
 	var icon = root_cell.get_node("ItemIcon")
-	icon.texture = load(tex_path)
+	icon.texture = ItemManager.items_db[item_id].get("texture_res")
 	icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 	icon.show()
@@ -1104,7 +1103,7 @@ func _animate_swap_fly(new_root: Control, old_global_pos: Vector2, old_rot: floa
 	var offset = old_global_pos - new_root.global_position - (new_root.size / 2.0)
 	icon.position = offset
 	icon.rotation_degrees = old_rot
-	var tw = create_tween().set_parallel(true).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+	var tw = create_tween().bind_node(self).set_parallel(true).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
 	tw.tween_property(icon, "position", final_pos, 0.25)
 	var diff = wrapf(final_rot - old_rot, -180.0, 180.0)
 	tw.tween_property(icon, "rotation_degrees", old_rot + diff, 0.25)
@@ -1152,7 +1151,7 @@ func _on_btn_rotate():
 		
 		var icon = active_cell.get_node("ItemIcon")
 		icon.rotation_degrees = old_rot 
-		var tw = create_tween().set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+		var tw = create_tween().bind_node(self).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
 		tw.tween_property(icon, "rotation_degrees", old_rot + 90, 0.25)
 		active_cell.set_meta("rot_deg", int(old_rot + 90) % 360)
 		_update_grid_visuals()
@@ -1212,14 +1211,14 @@ func _start_edit_mode(cell: Control, item_id: int, drag_node: Node3D, shape: Arr
 		edit_menu.show()
 		edit_menu.scale = Vector2(0.5, 0.5)
 		edit_menu.pivot_offset = edit_menu.size / 2.0
-		create_tween().set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT).tween_property(
+		create_tween().bind_node(self).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT).tween_property(
 			edit_menu, "scale", Vector2.ONE, 0.2)
 	_update_grid_visuals()
 
 func _tween_hide_edit_menu() -> void:
 	if not edit_menu:
 		return
-	var tw = create_tween().set_parallel(true).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN)
+	var tw = create_tween().bind_node(self).set_parallel(true).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN)
 	tw.tween_property(edit_menu, "scale", Vector2(0.5, 0.5), 0.15)
 	tw.tween_property(edit_menu, "modulate:a", 0.0, 0.15)
 	tw.chain().tween_callback(edit_menu.hide)
@@ -1264,7 +1263,7 @@ func start_appear_animation():
 	is_magnet_ready = false
 	show(); modulate.a = 0.0; var final_y = backpack_bg.position.y
 	backpack_bg.position.y += hide_pos_offset
-	var tw = create_tween().set_parallel(true).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+	var tw = create_tween().bind_node(self).set_parallel(true).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
 	tw.tween_property(self, "modulate:a", 1.0, 0.5); tw.tween_property(backpack_bg, "position:y", final_y, 0.7)
 	backpack_bg.pivot_offset = backpack_bg.size / 2.0; backpack_bg.scale = Vector2(0.7, 0.7)
 	tw.tween_property(backpack_bg, "scale", Vector2.ONE, 0.7).set_trans(Tween.TRANS_BACK)
@@ -1313,7 +1312,7 @@ func create_standalone_puzzle_visual(item_id: int, shape: Array, rot_deg: int) -
 
 	# 2. Добавляем иконку
 	var icon = TextureRect.new()
-	icon.texture = load(ItemManager.items_db[item_id]["texture"])
+	icon.texture = ItemManager.items_db[item_id].get("texture_res")
 	container.add_child(icon)
 	_align_icon_in_bbox(icon, item_id, shape, rot_deg)
 
@@ -1361,7 +1360,7 @@ func start_order_completed_sequence() -> void:
 	var start_scale = backpack_bg.scale
 	var target_scale = Vector2(1.1, 1.1)
 
-	var fade_tw = create_tween().set_parallel(true)
+	var fade_tw = create_tween().bind_node(self).set_parallel(true)
 
 	# TRANS_BACK + EASE_IN_OUT: лёгкий замах, затем мягкое торможение и overshoot (~0.95 с)
 	fade_tw.tween_method(

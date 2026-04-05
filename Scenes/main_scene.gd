@@ -1,5 +1,7 @@
 extends Node3D
 
+signal autofill_finished
+
 @onready var order_popup = $UILayer/Order_PopUp
 @onready var env_back = $UILayer/Order_PopUp/EnvelopeBack
 @onready var env_front = $UILayer/Order_PopUp/EnvelopeFront
@@ -68,6 +70,8 @@ var fast_cinematic_count: int = 0
 var autofill_cab_tween: Tween
 
 func _ready():
+	ItemManager.reset_level_state()
+
 	if start_button: start_button.pressed.connect(_on_start_pressed)
 	if ready_button: ready_button.pressed.connect(_on_ready_pressed)
 	if autofill_button:
@@ -90,6 +94,21 @@ func _ready():
 	ItemManager.perfect_clear_achieved.connect(_on_perfect_clear)
 	ItemManager.level_completed.connect(func(): print("Level finished!"))
 	ItemManager.combo_broken.connect(_on_combo_broken)
+	ItemManager.item_unfound.connect(_on_item_unfound)
+
+func _on_item_unfound(id: int):
+	if not side_widget:
+		return
+	var items_container = side_widget.items_container
+	var flipped_entries = []
+	for entry in items_container.get_children():
+		if int(entry.item_id) == int(id) and entry.get_meta("is_flipped", false):
+			flipped_entries.append(entry)
+
+	if flipped_entries.size() > 0:
+		var entry = flipped_entries.back()
+		entry.flip_to_back()
+		entry.set_meta("is_flipped", false)
 
 func _on_all_rewards_collected_visually() -> void:
 	if backpack_widget and backpack_widget.has_method("start_order_completed_sequence"):
@@ -103,8 +122,7 @@ func _on_combo_broken() -> void:
 
 func _on_perfect_clear() -> void:
 	if is_autofill_animating:
-		while is_autofill_animating:
-			await get_tree().process_frame
+		await autofill_finished
 
 	var popup: Control = load("res://Scenes/perfect_popup.gd").new() as Control
 	popup.z_index = 400
@@ -208,7 +226,7 @@ func _on_autofill_pressed():
 	if cabinet:
 		if autofill_cab_tween and autofill_cab_tween.is_running():
 			autofill_cab_tween.kill()
-		autofill_cab_tween = create_tween().set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
+		autofill_cab_tween = create_tween().bind_node(self).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
 		autofill_cab_tween.tween_property(cabinet, "rotation_degrees:y", cabinet.rotation_degrees.y + 720.0, total_anim_time)
 
 	var cam = get_viewport().get_camera_3d()
@@ -229,7 +247,7 @@ func _on_autofill_pressed():
 		fly_icon.modulate.a = 0.0
 		$UILayer.add_child(fly_icon)
 
-		var start_tw = create_tween()
+		var start_tw = create_tween().bind_node(self)
 		start_tw.tween_interval(i * 0.15)
 		start_tw.tween_callback(func():
 			var start_pos = get_viewport().get_visible_rect().size / 2.0
@@ -242,7 +260,7 @@ func _on_autofill_pressed():
 			fly_icon.scale = Vector2(0.2, 0.2) # Вылетает маленьким из шкафа
 			fly_icon.modulate.a = 1.0
 
-			var anim_tw = create_tween().set_parallel(true).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
+			var anim_tw = create_tween().bind_node(self).set_parallel(true).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
 			anim_tw.tween_property(fly_icon, "global_position", target_pos, 0.4)
 			anim_tw.tween_property(fly_icon, "scale", Vector2.ONE, 0.4)
 			# Вращение не нужно, так как форма паззла уже повернута правильно внутри контейнера
@@ -266,11 +284,14 @@ func _on_autofill_pressed():
 		fast_cinematic_count += added_cinematics
 
 	if autofill_button:
-		var tw = create_tween().set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+		var tw = create_tween().bind_node(self).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
 		tw.tween_property(autofill_button, "modulate:a", 0.0, 0.3)
 		tw.tween_callback(autofill_button.hide)
 		
-	get_tree().create_timer(total_anim_time).timeout.connect(func(): is_autofill_animating = false)
+	get_tree().create_timer(total_anim_time).timeout.connect(func():
+		is_autofill_animating = false
+		autofill_finished.emit()
+	)
 
 func _on_item_pressed(id: int, tex: String, node: Node3D):
 	if is_cinematic_playing: return
@@ -337,7 +358,10 @@ func _fly_back_and_cancel():
 	if node_to_return and is_instance_valid(node_to_return):
 		var tex_path = potential_drag_tex
 		var fly_icon = TextureRect.new()
-		fly_icon.texture = load(tex_path)
+		if potential_drag_id != -1 and ItemManager.items_db.has(potential_drag_id):
+			fly_icon.texture = ItemManager.items_db[potential_drag_id].get("texture_res")
+		if fly_icon.texture == null:
+			fly_icon.texture = load(tex_path)
 		fly_icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 		fly_icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 		fly_icon.size = fly_icon.texture.get_size() if fly_icon.texture else Vector2(100, 100)
@@ -352,7 +376,7 @@ func _fly_back_and_cancel():
 		if cabinet and cabinet.has_method("focus_item_face_to_camera") and node_to_return and not is_cinematic_playing:
 			cabinet.focus_item_face_to_camera(node_to_return, FOCUS_DURATION, true)
 
-		var local_fly_tween = create_tween().set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+		var local_fly_tween = create_tween().bind_node(self).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
 		local_fly_tween.tween_interval(FOCUS_DURATION)
 		local_fly_tween.tween_callback(_run_fly_icon_return_after_focus.bind(fly_icon, node_to_return))
 	current_drag_node = null
@@ -374,7 +398,7 @@ func _on_start_pressed():
 	is_game_started = false; time_left = total_time
 	
 	order_popup.position.y = env_intro_start_y; letter.position.y = let_intro_start_y; letter.scale.y = let_intro_start_scale_y
-	var tween = create_tween().set_parallel(true)
+	var tween = create_tween().bind_node(self).set_parallel(true)
 	tween.tween_property(order_popup, "position:y", env_intro_end_y, env_intro_duration).set_trans(env_intro_trans).set_ease(env_intro_ease)
 	tween.tween_property(env_back, "modulate:a", 1.0, env_intro_fade); tween.tween_property(env_front, "modulate:a", 1.0, env_intro_fade)
 	tween.tween_property(letter, "position:y", let_intro_end_y, let_intro_duration).set_trans(let_intro_trans).set_ease(let_intro_ease).set_delay(let_intro_delay)
@@ -382,7 +406,7 @@ func _on_start_pressed():
 	tween.tween_property(letter, "modulate:a", 1.0, let_intro_fade).set_delay(let_intro_delay)
 	
 	await get_tree().create_timer(let_intro_delay + let_intro_duration).timeout
-	if !is_game_started: ready_button.show(); create_tween().tween_property(ready_button, "modulate:a", 1.0, 0.2); is_timer_active = true
+	if !is_game_started: ready_button.show(); create_tween().bind_node(self).tween_property(ready_button, "modulate:a", 1.0, 0.2); is_timer_active = true
 
 func _on_ready_pressed():
 	if is_game_started: return
@@ -395,7 +419,7 @@ func _on_timer_timeout():
 func start_game_flow():
 	is_game_started = true; ready_button.disabled = true
 	if cabinet: cabinet.build_cabinet_tornado()
-	var outro = create_tween().set_parallel(true)
+	var outro = create_tween().bind_node(self).set_parallel(true)
 	outro.tween_property(order_popup, "position:y", env_outro_end_y, env_outro_duration).set_trans(env_outro_trans).set_ease(env_outro_ease)
 	outro.tween_property(env_back, "modulate:a", 0.0, env_outro_fade); outro.tween_property(env_front, "modulate:a", 0.0, env_outro_fade)
 	outro.tween_property(letter, "position:y", let_outro_end_y, let_outro_duration).set_trans(let_outro_trans).set_ease(let_outro_ease).set_delay(let_outro_delay)
@@ -424,7 +448,7 @@ func _run_fly_icon_return_after_focus(fly_icon: TextureRect, drag_node: Node3D) 
 
 		target_pos = cam.unproject_position(drag_node.global_position) - fly_icon.pivot_offset
 
-	var local_inner_tween = create_tween().set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+	var local_inner_tween = create_tween().bind_node(self).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
 	local_inner_tween.tween_property(fly_icon, "global_position", target_pos, 0.3)
 	local_inner_tween.tween_callback(func():
 		fly_icon.queue_free()
@@ -448,9 +472,11 @@ func fly_back_to_cabinet(item_id: int, start_pos: Vector2, drag_node: Node3D, sk
 			if drag_node.has_method("show_item"): drag_node.show_item()
 			else: drag_node.show()
 		return
-	var tex_path = ItemManager.items_db[item_id]["texture"]
+	var db_entry = ItemManager.items_db[item_id]
 	var fly_icon = TextureRect.new()
-	fly_icon.texture = load(tex_path)
+	fly_icon.texture = db_entry.get("texture_res")
+	if fly_icon.texture == null and db_entry.get("texture", "") != "":
+		fly_icon.texture = load(db_entry["texture"])
 	fly_icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	fly_icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 	fly_icon.size = fly_icon.texture.get_size() if fly_icon.texture else Vector2(100, 100)
@@ -464,6 +490,6 @@ func fly_back_to_cabinet(item_id: int, start_pos: Vector2, drag_node: Node3D, sk
 	if cabinet and cabinet.has_method("focus_item_face_to_camera") and drag_node and not is_cinematic_playing:
 		cabinet.focus_item_face_to_camera(drag_node, FOCUS_DURATION, true)
 
-	var local_fly_tween = create_tween().set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+	var local_fly_tween = create_tween().bind_node(self).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
 	local_fly_tween.tween_interval(FOCUS_DURATION)
 	local_fly_tween.tween_callback(_run_fly_icon_return_after_focus.bind(fly_icon, drag_node))
