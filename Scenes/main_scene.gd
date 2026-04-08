@@ -94,9 +94,10 @@ func _ready():
 	ItemManager.item_pressed.connect(_on_item_pressed)
 
 	ItemManager.perfect_clear_achieved.connect(_on_perfect_clear)
-	ItemManager.level_completed.connect(func(): print("Level finished!"))
+	ItemManager.level_completed.connect(_on_level_completed_normal)
 	ItemManager.combo_broken.connect(_on_combo_broken)
 	ItemManager.item_unfound.connect(_on_item_unfound)
+	ItemManager.out_of_attempts.connect(_on_out_of_attempts)
 
 func _on_item_unfound(id: int):
 	if not side_widget:
@@ -138,6 +139,51 @@ func _on_perfect_clear() -> void:
 	# Нет шкафа — сигнала all_rewards_collected_visually не будет; взлёт через 1с после появления Perfect
 	if cabinet == null:
 		get_tree().create_timer(1.0).timeout.connect(_on_all_rewards_collected_visually)
+
+func _on_level_completed_normal() -> void:
+	# Если Perfect Clear, рюкзак прыгнет ПОСЛЕ анимации открытия шкафа.
+	# Если комбо сброшено, анимации шкафа не будет, поэтому прыгаем СРАЗУ.
+	if ItemManager.combo_failed:
+		if backpack_widget and backpack_widget.has_method("start_order_completed_sequence"):
+			backpack_widget.start_order_completed_sequence()
+
+func _on_out_of_attempts() -> void:
+	# Грузим сцену попапа
+	var popup_scene = load("res://Scenes/OutOfAttemptsPopup.tscn")
+	if not popup_scene:
+		printerr("Не удалось загрузить OutOfAttemptsPopup.tscn!")
+		return
+
+	var popup_instance = popup_scene.instantiate()
+	$UILayer.add_child(popup_instance)
+
+	# НАДЕЖНЫЙ СПОСОБ ПОДКЛЮЧЕНИЯ (Godot 4 Fallback)
+	if popup_instance.has_signal("popup_closed"):
+		popup_instance.connect("popup_closed", func(action: String):
+			if action == "continue":
+				if backpack_widget and backpack_widget.has_method("start_order_completed_sequence"):
+					backpack_widget.start_order_completed_sequence()
+			elif action == "autofill":
+				_play_ad_autofill_sequence()
+		)
+	else:
+		printerr("ОШИБКА: Сигнал 'popup_closed' не найден в out_of_attempts_popup.gd. Убедитесь, что скрипт сохранен!")
+
+	popup_instance.open_popup(attempts_widget)
+
+func _play_ad_autofill_sequence() -> void:
+	# Ждем, пока попап исчезнет (чтобы разлет не перекрывался UI-окном)
+	await get_tree().create_timer(0.3).timeout
+
+	# Существующая функция автосбора делает ровно то, что нам нужно!
+	_on_autofill_pressed()
+
+	# Ждем окончания прилета всех предметов
+	await autofill_finished
+
+	# Триггерим финальный прыжок рюкзака
+	if backpack_widget and backpack_widget.has_method("start_order_completed_sequence"):
+		backpack_widget.start_order_completed_sequence()
 
 func _process(delta):
 	if is_timer_active and time_left > 0:

@@ -110,23 +110,38 @@ func mark_item_as_found(id: int) -> bool:
 			target_item = item
 			break
 
-	# 2. Списываем попытку ЗНАЯ статус предмета
+	# 2. Если правильно - сразу помечаем, чтобы проверить завершенность заказа
+	var is_order_full = false
+	if is_correct:
+		target_item["found"] = true
+		is_order_full = true
+		for item in current_order:
+			if not item["found"]:
+				is_order_full = false
+				break
+
+	# 3. Списываем попытку
 	if current_attempts > 0:
 		current_attempts -= 1
 		attempts_updated.emit(current_attempts, is_correct)
-		if current_attempts == 0:
+		# КОНФЛИКТ ПОСЛЕДНЕГО ШАНСА: если 0, но заказ собран - это победа, а не проигрыш!
+		if current_attempts == 0 and not is_order_full:
 			out_of_attempts.emit()
 
-	# 3. Применяем логику успеха
+	# 4. Применяем логику успеха
 	if is_correct:
-		target_item["found"] = true
 		if not combo_failed:
 			combo_score += 1
 		item_found.emit(id)
-		_check_order_completion()
+
+		# Если заказ полностью собран
+		if is_order_full:
+			level_completed.emit()
+			if not combo_failed:
+				perfect_clear_achieved.emit()
 		return true
 
-	# 4. Логика провала (Игрок положил мусор)
+	# 5. Логика провала (Игрок положил мусор)
 	if not is_correct and not combo_failed:
 		combo_failed = true
 		combo_score = 0
@@ -146,17 +161,6 @@ func unmark_item_as_found(id: int) -> void:
 
 				item_unfound.emit(id)
 			return
-
-func _check_order_completion() -> void:
-	var all_found := true
-	for item in current_order:
-		if not item["found"]:
-			all_found = false
-			break
-	if all_found:
-		level_completed.emit()
-		if not combo_failed:
-			perfect_clear_achieved.emit()
 
 func generate_new_order():
 	current_order.clear()

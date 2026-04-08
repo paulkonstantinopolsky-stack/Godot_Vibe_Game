@@ -1,0 +1,196 @@
+[gd_scene format=3 uid="uid://1v7w3dk23cqn"]
+
+[ext_resource type="Script" uid="uid://bh3nqrs5wpslx" path="res://out_of_attempts_popup.gd" id="1_ceblv"]
+[ext_resource type="Texture2D" uid="uid://dy6pyglh5ktw3" path="res://Assets/2D/ADS_Paper.png" id="2_gp4vr"]
+[ext_resource type="Texture2D" uid="uid://c88waunemtx3v" path="res://Assets/2D/Decor_Title.png" id="4_cpj0r"]
+[ext_resource type="Texture2D" uid="uid://bw0d1xe8gxfic" path="res://Assets/2D/BtnCancel.png" id="5_xq6wn"]
+[ext_resource type="FontFile" uid="uid://crl2jbvqyt7jm" path="res://Fonts/Comfortaa-Bold.ttf" id="6_mo6a8"]
+[ext_resource type="Texture2D" uid="uid://dbmg37quxqu5j" path="res://Assets/2D/ADS_Button.png" id="7_pm81s"]
+[ext_resource type="Texture2D" uid="uid://b2wwgfk4vr0u4" path="res://Assets/2D/ADS_Icon.png" id="8_714w0"]
+
+[sub_resource type="StyleBoxTexture" id="StyleBoxTexture_d56os"]
+texture = ExtResource("7_pm81s")
+
+[sub_resource type="StyleBoxTexture" id="StyleBoxTexture_ox2f7"]
+texture = ExtResource("7_pm81s")
+
+[sub_resource type="StyleBoxTexture" id="StyleBoxTexture_2ug8y"]
+texture = ExtResource("7_pm81s")
+
+[node name="OutOfAttemptsPopup" type="Control" unique_id=1459985145]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("1_ceblv")
+
+[node name="Overlay" type="ColorRect" parent="." unique_id=1209783188]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+color = Color(0, 0, 0, 0)
+
+[node name="ContentBox" type="Control" parent="." unique_id=1027376696]
+layout_mode = 1
+anchor_left = 0.016666668
+anchor_top = 0.185
+anchor_right = 0.98333335
+anchor_bottom = 0.815
+grow_horizontal = 2
+grow_vertical = 2
+pivot_offset = Vector2(522, 756)
+metadata/_edit_use_anchors_ = true
+
+[node name="PaperBackground" type="TextureRect" parent="ContentBox" unique_id=763002122]
+layout_mode = 1
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -522.0
+offset_top = -756.0
+offset_right = 522.0
+offset_bottom = 756.0
+grow_horizontal = 2
+grow_vertical = 2
+texture = ExtResource("2_gp4vr")
+expand_mode = 1
+stretch_mode = 3
+
+[node name="Title" type="HBoxContainer" parent="ContentBox" unique_id=1305558920]
+layout_mode = 1
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -477.0
+offset_top = 30.0
+offset_right = 477.0
+offset_bottom = 133.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/separation = 30
+
+[node name="LeftDeco" type="TextureRect" parent="ContentBox/Title" unique_id=1769392234]
+custom_minimum_size = Vector2(158, 14)
+layout_mode = 2
+texture = ExtResource("4_cpj0r")
+expand_mode = 1
+stretch_mode = 3
+flip_h = true
+
+[node name="TitleLabel" type="Label" parent="ContentBox/Title" unique_id=2073335092]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.36862746, 0.2784314, 0.18039216, 1)
+theme_override_font_sizes/font_size = 72
+text = "Out of attempts"
+
+[node name="RightDeco" type="TextureRect" parent="ContentBox/Title" unique_id=1572149685]
+custom_minimum_size = Vector2(158, 14)
+layout_mode = 2
+texture = ExtResource("4_cpj0r")
+expand_mode = 1
+stretch_mode = 3
+
+[node name="ParagraphLabel" type="Label" parent="ContentBox" unique_id=1160625853]
+layout_mode = 1
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -379.5
+offset_top = 194.0
+offset_right = 379.5
+offset_bottom = 431.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_colors/font_color = Color(0.36862746, 0.2784314, 0.18039216, 1)
+theme_override_constants/line_spacing = -10
+theme_override_font_sizes/font_size = 56
+text = "Watch an AD and we'll place
+all the right items. Your cats
+will be happy!"
+horizontal_alignment = 1
+
+[node name="BtnClose" type="TextureButton" parent="ContentBox" unique_id=1219888365]
+modulate = Color(1, 1, 1, 0)
+custom_minimum_size = Vector2(120, 120)
+layout_mode = 1
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = 385.0
+offset_top = -803.0
+offset_right = 505.0
+offset_bottom = -683.0
+grow_horizontal = 2
+grow_vertical = 2
+texture_normal = ExtResource("5_xq6wn")
+texture_pressed = ExtResource("5_xq6wn")
+texture_hover = ExtResource("5_xq6wn")
+ignore_texture_size = true
+stretch_mode = 0
+
+[node name="BtnAutofill" type="Button" parent="ContentBox" unique_id=2049651593]
+unique_name_in_owner = true
+modulate = Color(1, 1, 1, 0)
+custom_minimum_size = Vector2(588, 164)
+layout_mode = 1
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -294.0
+offset_top = 503.0
+offset_right = 294.0
+offset_bottom = 671.9999
+grow_horizontal = 2
+grow_vertical = 2
+pivot_offset = Vector2(233, 91)
+theme_override_colors/font_color = Color(1, 0.9647059, 0.92156863, 1)
+theme_override_fonts/font = ExtResource("6_mo6a8")
+theme_override_font_sizes/font_size = 54
+theme_override_styles/normal = SubResource("StyleBoxTexture_d56os")
+theme_override_styles/pressed = SubResource("StyleBoxTexture_ox2f7")
+theme_override_styles/hover = SubResource("StyleBoxTexture_2ug8y")
+
+[node name="HBoxContainer" type="HBoxContainer" parent="ContentBox/BtnAutofill" unique_id=612937231]
+layout_mode = 1
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -477.0
+offset_top = -51.5
+offset_right = 477.0
+offset_bottom = 51.5
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/separation = 30
+alignment = 1
+
+[node name="Icon" type="TextureRect" parent="ContentBox/BtnAutofill/HBoxContainer" unique_id=1360527291]
+custom_minimum_size = Vector2(102, 74)
+layout_mode = 2
+texture = ExtResource("8_714w0")
+expand_mode = 1
+stretch_mode = 3
+
+[node name="TitleLabel" type="Label" parent="ContentBox/BtnAutofill/HBoxContainer" unique_id=686053403]
+layout_mode = 2
+theme_override_colors/font_color = Color(1, 1, 1, 1)
+theme_override_font_sizes/font_size = 72
+text = "Watch"
+horizontal_alignment = 1

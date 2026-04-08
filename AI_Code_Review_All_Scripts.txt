@@ -1,11 +1,11 @@
 ﻿AI Code Review Bundle - All GDScript Files
-Generated: 2026-04-08 16:06:34
+Generated: 2026-04-08 16:55:02
 
 
 ============================================================
 SCRIPT: ItemManager.gd
 PATH: res://ItemManager.gd
-THESIS: Глобальный менеджер предметов: загрузка базы, генерация заказа, проверка найденных предметов, комбо-логика и назначение форм для паззлов.
+THESIS: Глобальный менеджер предметов: загрузка базы, генерация заказа, проверка предметов, комбо-логика и счетчик попыток.
 -------------------- FULL SOURCE ---------------------------
 extends Node
 
@@ -21,12 +21,16 @@ signal item_pressed(id: int, tex_path: String, node: Node3D)
 signal level_completed()
 signal perfect_clear_achieved()
 signal combo_broken()
+signal attempts_updated(attempts_left: int, is_correct: bool)
+signal out_of_attempts()
 
 var is_dragging_item: bool = false 
 var is_edit_mode: bool = false
 
 var combo_score: int = 0
 var combo_failed: bool = false
+var max_attempts: int = 8
+var current_attempts: int = 8
 
 # =================================================================
 # Р“Р•РћРњР•РўР РРЇ Р Р®РљР—РђРљРђ (РґР»СЏ РїСЂРѕРІРµСЂРєРё РІРјРµСЃС‚РёРјРѕСЃС‚Рё РїСЂРё РіРµРЅРµСЂР°С†РёРё С„РѕСЂРј)
@@ -101,25 +105,37 @@ func reset_level_state() -> void:
 	is_edit_mode = false
 	combo_score = 0
 	combo_failed = false
+	current_attempts = max_attempts
+	attempts_updated.emit(current_attempts, false)
 
 func mark_item_as_found(id: int) -> bool:
 	var is_correct = false
+	var target_item = null
+
+	# 1. Р—Р°СЂР°РЅРµРµ РїСЂРѕРІРµСЂСЏРµРј, РїСЂР°РІРёР»СЊРЅС‹Р№ Р»Рё СЌС‚Рѕ РїСЂРµРґРјРµС‚
 	for item in current_order:
-		if item["id"] == id:
-			if not item["found"]:
-				item["found"] = true
-				is_correct = true
+		if item["id"] == id and not item["found"]:
+			is_correct = true
+			target_item = item
+			break
 
-				# РќР°С‡РёСЃР»СЏРµРј РѕС‡РєРё С‚РѕР»СЊРєРѕ РµСЃР»Рё РєРѕРјР±Рѕ РµС‰Рµ Р¶РёРІРѕ
-				if not combo_failed:
-					combo_score += 1
+	# 2. РЎРїРёСЃС‹РІР°РµРј РїРѕРїС‹С‚РєСѓ Р—РќРђРЇ СЃС‚Р°С‚СѓСЃ РїСЂРµРґРјРµС‚Р°
+	if current_attempts > 0:
+		current_attempts -= 1
+		attempts_updated.emit(current_attempts, is_correct)
+		if current_attempts == 0:
+			out_of_attempts.emit()
 
-				item_found.emit(id)
-				_check_order_completion()
-				return true
+	# 3. РџСЂРёРјРµРЅСЏРµРј Р»РѕРіРёРєСѓ СѓСЃРїРµС…Р°
+	if is_correct:
+		target_item["found"] = true
+		if not combo_failed:
+			combo_score += 1
+		item_found.emit(id)
+		_check_order_completion()
+		return true
 
-	# РџСЂР°РІРёР»Рѕ: РРіСЂРѕРє РїРѕР»РѕР¶РёР» РќР•Р’Р•Р РќР«Р™ РїСЂРµРґРјРµС‚.
-	# Р•СЃР»Рё РєРѕРјР±Рѕ РµС‰Рµ Р±С‹Р»Рѕ Р¶РёРІРѕ вЂ” СѓР±РёРІР°РµРј РµРіРѕ РЅР°РІСЃРµРіРґР° Рё РѕРґРёРЅ СЂР°Р· СЃРёРіРЅР°Р»РёР·РёСЂСѓРµРј РѕР± СЌС‚РѕРј.
+	# 4. Р›РѕРіРёРєР° РїСЂРѕРІР°Р»Р° (РРіСЂРѕРє РїРѕР»РѕР¶РёР» РјСѓСЃРѕСЂ)
 	if not is_correct and not combo_failed:
 		combo_failed = true
 		combo_score = 0
@@ -271,7 +287,7 @@ func _rotate_shape_norm(shape: Array, rot: int) -> Array:
 ============================================================
 SCRIPT: item_data.gd
 PATH: res://item_data.gd
-THESIS: Ресурс данных предмета: id, текстура, тип формы и выдача геометрии формы.
+THESIS: Ресурс предмета: хранит id/текстуру/тип формы и возвращает геометрию shape.
 -------------------- FULL SOURCE ---------------------------
 extends Resource
 class_name ItemData
@@ -312,7 +328,7 @@ func get_shape() -> Array:
 ============================================================
 SCRIPT: item_card.gd
 PATH: res://item_card.gd
-THESIS: UI-карточка предмета в письме заказа: подставляет иконку по пути текстуры.
+THESIS: UI-карточка в письме заказа: выставляет иконку предмета по пути текстуры.
 -------------------- FULL SOURCE ---------------------------
 extends Control
 
@@ -325,7 +341,7 @@ func set_item(tex_path: String):
 ============================================================
 SCRIPT: game_palette.gd
 PATH: res://game_palette.gd
-THESIS: Палитра UI-цветов для состояний паззла и ячеек.
+THESIS: Палитра цветов интерфейса для разных состояний паззла и ячеек.
 -------------------- FULL SOURCE ---------------------------
 extends Resource
 class_name GamePalette
@@ -358,7 +374,7 @@ class_name GamePalette
 ============================================================
 SCRIPT: main_scene.gd
 PATH: res://Scenes/main_scene.gd
-THESIS: Главный оркестратор сцены: старт раунда, таймер, drag-and-drop, автозаполнение, синхронизация UI и 3D-части.
+THESIS: Главный контроллер раунда: запуск, таймер, drag-and-drop, автозаполнение, синхронизация UI/3D.
 -------------------- FULL SOURCE ---------------------------
 extends Node3D
 
@@ -375,6 +391,7 @@ signal autofill_finished
 @onready var backpack_widget = $UILayer/BackpackWidget
 @onready var drag_preview = $UILayer/DragPreview
 @onready var autofill_button = get_node_or_null("UILayer/AutofillButton")
+@onready var attempts_widget = get_node_or_null("UILayer/AttemptsWidget")
 
 @export_group("РЎСЃС‹Р»РєРё РЅР° РѕР±СЉРµРєС‚С‹")
 @export var cabinet: Node3D
@@ -447,6 +464,7 @@ func _ready():
 	if backpack_widget: backpack_widget.hide()
 	if drag_preview: drag_preview.hide()
 	if cabinet: cabinet.hide()
+	if attempts_widget: attempts_widget.hide()
 
 	if cabinet:
 		cabinet.all_rewards_collected_visually.connect(_on_all_rewards_collected_visually)
@@ -793,6 +811,7 @@ func start_game_flow():
 	outro.chain().tween_callback(func():
 		if side_widget: side_widget.start_appear_animation()
 		if backpack_widget: backpack_widget.start_appear_animation()
+		if attempts_widget: attempts_widget.start_appear_animation()
 		if autofill_button: autofill_button.modulate.a = 1.0; autofill_button.show()
 	)
 
@@ -860,7 +879,7 @@ func fly_back_to_cabinet(item_id: int, start_pos: Vector2, drag_node: Node3D, sk
 ============================================================
 SCRIPT: cabinet.gd
 PATH: res://Scenes/cabinet.gd
-THESIS: 3D-шкаф: сборка цилиндра из ячеек, инерционное вращение, кинематика бонусных ячеек и сигналы завершения наград.
+THESIS: 3D-шкаф: генерация и анимация ячеек, вращение, открытие бонусов и последовательность монет.
 -------------------- FULL SOURCE ---------------------------
 extends Node3D
 
@@ -1382,7 +1401,7 @@ func _on_bonus_coin_flight_finished() -> void:
 ============================================================
 SCRIPT: coin_3d.gd
 PATH: res://Scenes/coin_3d.gd
-THESIS: Логика бонусной монеты: разблокировка, вылет, полет, уведомление шкафа о завершении анимации.
+THESIS: Логика бонусной монеты: unlock, полет, уведомление шкафа и удаление после завершения.
 -------------------- FULL SOURCE ---------------------------
 extends Node3D
 
@@ -1469,7 +1488,7 @@ func collect_coin():
 ============================================================
 SCRIPT: Item_3d.gd
 PATH: res://Scenes/Item_3d.gd
-THESIS: 3D-предмет шкафа: настройка текстуры, обработка клика и скрытие/показ спрайта при перетаскивании.
+THESIS: 3D-предмет шкафа: инициализация текстуры, обработка клика и hide/show спрайта.
 -------------------- FULL SOURCE ---------------------------
 extends Node3D
 
@@ -1507,7 +1526,7 @@ func show_item():
 ============================================================
 SCRIPT: backpack_widget.gd
 PATH: res://Scenes/backpack_widget.gd
-THESIS: Ключевая логика рюкзака: сетка, размещение/редактирование форм, превью драга, swap-алгоритмы, автоупаковка и финальная анимация.
+THESIS: Логика рюкзака: сетка, размещение форм, превью, swap, автоупаковка и финальная анимация закрытия.
 -------------------- FULL SOURCE ---------------------------
 extends Control
 
@@ -3013,7 +3032,7 @@ func _on_packing_final_completed() -> void:
 ============================================================
 SCRIPT: backpack_closing_sequence.gd
 PATH: res://Scenes/backpack_closing_sequence.gd
-THESIS: Контрол закрытия рюкзака по кадрам: drag-хэндл, снап к открытому/закрытому состоянию и сигнал завершения.
+THESIS: UI-последовательность закрытия рюкзака по кадрам с drag-снапом и сигналом завершения.
 -------------------- FULL SOURCE ---------------------------
 extends Control
 
@@ -3093,7 +3112,7 @@ func _on_snap_finished():
 ============================================================
 SCRIPT: order_pop_up.gd
 PATH: res://Scenes/order_pop_up.gd
-THESIS: Попап заказа: очищает и заполняет список карточек текущими item-иконками.
+THESIS: Попап заказа: очищает и заново заполняет иконки текущего заказа.
 -------------------- FULL SOURCE ---------------------------
 extends Control
 
@@ -3122,7 +3141,7 @@ func fill_order_icons():
 ============================================================
 SCRIPT: side_widget.gd
 PATH: res://Scenes/side_widget.gd
-THESIS: Боковой UI заказа: анимированное появление списка и реакция на найденные предметы/комбо.
+THESIS: Боковой виджет заказа: анимированное появление элементов и реакция на найденные предметы.
 -------------------- FULL SOURCE ---------------------------
 extends Control
 
@@ -3189,7 +3208,7 @@ func _on_item_found(id: int):
 ============================================================
 SCRIPT: side_widget_entry.gd
 PATH: res://Scenes/side_widget_entry.gd
-THESIS: Одна карточка side-widget: двусторонняя анимация переворота front/back.
+THESIS: Элемент списка заказа: переворот карточки между back/front.
 -------------------- FULL SOURCE ---------------------------
 extends Control
 
@@ -3235,7 +3254,7 @@ func flip_to_back():
 ============================================================
 SCRIPT: combo_widget.gd
 PATH: res://Scenes/combo_widget.gd
-THESIS: Комбо-индикатор: успешное/провальное состояние, выезд плашки, анимации показа и скрытия.
+THESIS: Комбо-виджет: показ успеха/провала, выезд плашки и авто-скрытие.
 -------------------- FULL SOURCE ---------------------------
 extends Control
 
@@ -3312,7 +3331,7 @@ func _play_animation() -> void:
 ============================================================
 SCRIPT: perfect_popup.gd
 PATH: res://Scenes/perfect_popup.gd
-THESIS: Попап Perfect Memory: затемнение, глиттер-шейдер, плавные интро/аутро анимации.
+THESIS: Полноэкранный Perfect-попап с затемнением, glint-шейдером и интро/аутро анимацией.
 -------------------- FULL SOURCE ---------------------------
 extends Control
 
@@ -3385,7 +3404,7 @@ func play_animation(on_complete: Callable) -> void:
 ============================================================
 SCRIPT: cell_border.gd
 PATH: res://Scenes/cell_border.gd
-THESIS: Отрисовка и анимация рамок ячеек (default/dashed/focused), включая бегущий dashed-бордер.
+THESIS: Отрисовка рамок ячейки (default/dashed/focused) с анимированной пунктирной обводкой.
 -------------------- FULL SOURCE ---------------------------
 extends Control
 
@@ -3570,7 +3589,7 @@ func _get_rounded_rect_points(rect: Rect2, r: float, points_per_arc: int) -> Pac
 ============================================================
 SCRIPT: cell_red.gd
 PATH: res://Scenes/cell_red.gd
-THESIS: Красная бонусная ячейка: открытие дверей, запуск конфетти и разблокировка вложенной награды.
+THESIS: Красная бонусная ячейка: открывает двери, запускает конфетти и активирует награду.
 -------------------- FULL SOURCE ---------------------------
 extends Node3D
 
@@ -3653,6 +3672,83 @@ func _setup_confetti_particles() -> void:
 	grad.add_point(0.66, Color(0.2, 0.5, 1.0))
 	grad.add_point(1.0, Color(1.0, 0.8, 0.2))
 	confetti.color_initial_ramp = grad
+
+
+
+============================================================
+SCRIPT: attempts_widget.gd
+PATH: res://Scenes/attempts_widget.gd
+THESIS: UI-виджет попыток: слушает ItemManager, обновляет счетчик и проигрывает пульс/блик при списании.
+-------------------- FULL SOURCE ---------------------------
+extends Control
+
+@onready var heart_icon = $HeartIcon
+@onready var count_label = $HeartIcon/CountLabel
+
+var pulse_tween: Tween
+var _shader_mat: ShaderMaterial
+
+func _ready() -> void:
+	hide()
+
+	if not ItemManager.attempts_updated.is_connected(_on_attempts_updated):
+		ItemManager.attempts_updated.connect(_on_attempts_updated)
+
+	count_label.text = str(ItemManager.current_attempts)
+
+	# РЎРѕР·РґР°РµРј СѓРЅРёРєР°Р»СЊРЅС‹Р№ РјР°С‚РµСЂРёР°Р» СЃ С€РµР№РґРµСЂРѕРј Р±Р»РёРєР°
+	_shader_mat = ShaderMaterial.new()
+	_shader_mat.shader = load("res://Shaders/glint.gdshader")
+	_shader_mat.set_shader_parameter("progress", -0.1) # РџСЂСЏС‡РµРј Р±Р»РёРє Р·Р° РїСЂРµРґРµР»С‹
+	heart_icon.material = _shader_mat
+
+func start_appear_animation() -> void:
+	show()
+	modulate.a = 0.0
+	var tw = create_tween().bind_node(self).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	tw.tween_property(self, "modulate:a", 1.0, 0.4)
+
+func _on_attempts_updated(new_val: int, is_correct: bool) -> void:
+	# Р—Р°С‰РёС‚Р° РѕС‚ Р°РЅРёРјР°С†РёРё РїСЂРё СЂРµСЃС‚Р°СЂС‚Рµ СѓСЂРѕРІРЅСЏ
+	if new_val == ItemManager.max_attempts:
+		count_label.text = str(new_val)
+		return
+
+	if pulse_tween and pulse_tween.is_valid():
+		pulse_tween.kill()
+
+	pulse_tween = create_tween().bind_node(self)
+
+	# Р•СЃР»Рё РїСЂРµРґРјРµС‚ РІРµСЂРЅС‹Р№ - Р¶РґРµРј 0.35СЃ, РїРѕРєР° РїРµСЂРµРІРµСЂРЅРµС‚СЃСЏ РєР°СЂС‚РѕС‡РєР° РІ SideWidget
+	if is_correct:
+		pulse_tween.tween_interval(0.35)
+
+	# РџРѕРґРіРѕС‚РѕРІРєР° РїРµСЂРµРґ РїСѓР»СЊСЃРѕРј
+	pulse_tween.tween_callback(func():
+		_shader_mat.set_shader_parameter("progress", 0.0)
+	)
+
+	# Р¤РђР—Рђ 1: "Р’Р·РґРѕС…" (РЅР°РїРѕР»РЅРµРЅРёРµ СЃРµСЂРґС†Р°) + РџСЂРѕС…РѕРґ Р±Р»РёРєР°
+	var phase1 = pulse_tween.parallel()
+	phase1.tween_property(heart_icon, "scale", Vector2(1.35, 1.35), 0.25).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+	phase1.tween_method(
+		func(v: float): _shader_mat.set_shader_parameter("progress", v),
+		0.0, 1.0, 0.25
+	).set_trans(Tween.TRANS_LINEAR)
+
+	# Р¤РђР—Рђ 2: РџРёРє РїСѓР»СЊСЃР° (РјРёРєСЂРѕ-Р·Р°РІРёСЃР°РЅРёРµ Рё РёР·РјРµРЅРµРЅРёРµ С†РёС„СЂС‹)
+	pulse_tween.chain().tween_callback(func():
+		count_label.text = str(new_val)
+	)
+	pulse_tween.tween_property(heart_icon, "scale", Vector2(1.45, 1.45), 0.05).set_trans(Tween.TRANS_LINEAR)
+
+	# Р¤РђР—Рђ 3: РЈРїСЂСѓРіРёР№ РІРѕР·РІСЂР°С‚ (Elastic snap)
+	pulse_tween.chain().tween_property(heart_icon, "scale", Vector2.ONE, 0.5).set_trans(Tween.TRANS_ELASTIC).set_ease(Tween.EASE_OUT)
+
+	# РџСЂСЏС‡РµРј Р±Р»РёРє РІ РєРѕРЅС†Рµ, С‡С‚РѕР±С‹ РЅРµ РѕСЃС‚Р°РІР»СЏС‚СЊ Р°СЂС‚РµС„Р°РєС‚РѕРІ
+	pulse_tween.parallel().tween_callback(func():
+		_shader_mat.set_shader_parameter("progress", -0.1)
+	).set_delay(0.1)
 
 
 
