@@ -12,12 +12,16 @@ signal item_pressed(id: int, tex_path: String, node: Node3D)
 signal level_completed()
 signal perfect_clear_achieved()
 signal combo_broken()
+signal attempts_updated(attempts_left: int, is_correct: bool)
+signal out_of_attempts()
 
 var is_dragging_item: bool = false 
 var is_edit_mode: bool = false
 
 var combo_score: int = 0
 var combo_failed: bool = false
+var max_attempts: int = 8
+var current_attempts: int = 8
 
 # =================================================================
 # ГЕОМЕТРИЯ РЮКЗАКА (для проверки вместимости при генерации форм)
@@ -92,25 +96,37 @@ func reset_level_state() -> void:
 	is_edit_mode = false
 	combo_score = 0
 	combo_failed = false
+	current_attempts = max_attempts
+	attempts_updated.emit(current_attempts, false)
 
 func mark_item_as_found(id: int) -> bool:
 	var is_correct = false
+	var target_item = null
+
+	# 1. Заранее проверяем, правильный ли это предмет
 	for item in current_order:
-		if item["id"] == id:
-			if not item["found"]:
-				item["found"] = true
-				is_correct = true
+		if item["id"] == id and not item["found"]:
+			is_correct = true
+			target_item = item
+			break
 
-				# Начисляем очки только если комбо еще живо
-				if not combo_failed:
-					combo_score += 1
+	# 2. Списываем попытку ЗНАЯ статус предмета
+	if current_attempts > 0:
+		current_attempts -= 1
+		attempts_updated.emit(current_attempts, is_correct)
+		if current_attempts == 0:
+			out_of_attempts.emit()
 
-				item_found.emit(id)
-				_check_order_completion()
-				return true
+	# 3. Применяем логику успеха
+	if is_correct:
+		target_item["found"] = true
+		if not combo_failed:
+			combo_score += 1
+		item_found.emit(id)
+		_check_order_completion()
+		return true
 
-	# Правило: Игрок положил НЕВЕРНЫЙ предмет.
-	# Если комбо еще было живо — убиваем его навсегда и один раз сигнализируем об этом.
+	# 4. Логика провала (Игрок положил мусор)
 	if not is_correct and not combo_failed:
 		combo_failed = true
 		combo_score = 0

@@ -11,6 +11,7 @@
 [ext_resource type="PackedScene" uid="uid://q7m4xv1o6ted" path="res://item_card.tscn" id="4_0k7nw"]
 [ext_resource type="Texture2D" uid="uid://dc66gu7d3mxe" path="res://Assets/2D/Back.png" id="4_7h23t"]
 [ext_resource type="Texture2D" uid="uid://bbvo82e2lqwdp" path="res://Assets/2D/Letter.png" id="5_06phl"]
+[ext_resource type="PackedScene" uid="uid://bps6qpgxd7ibr" path="res://Scenes/Attempts_widget.tscn" id="6_m2luv"]
 [ext_resource type="Texture2D" uid="uid://bn060pxm84m5p" path="res://Assets/2D/Front.png" id="6_s7evf"]
 [ext_resource type="Texture2D" uid="uid://dx8cho3u0k5o2" path="res://Assets/2D/Start_Button_Pressed.png" id="8_s7evf"]
 [ext_resource type="PackedScene" uid="uid://u5gntfpcipaa" path="res://Scenes/SideWidget.tscn" id="11_np8lt"]
@@ -262,6 +263,19 @@ offset_left = 30.0
 offset_top = 27.0
 offset_right = -920.0
 offset_bottom = -1473.0
+
+[node name="AttemptsWidget" parent="UILayer" unique_id=524758923 instance=ExtResource("6_m2luv")]
+anchors_preset = 1
+anchor_left = 1.0
+anchor_bottom = 0.0
+offset_left = -175.0
+offset_top = 28.0
+offset_right = -175.0
+offset_bottom = 28.0
+grow_horizontal = 0
+grow_vertical = 1
+size_flags_horizontal = 4
+size_flags_vertical = 4
 
 [node name="DragPreview" type="TextureRect" parent="UILayer" unique_id=1281595320]
 offset_right = 40.0

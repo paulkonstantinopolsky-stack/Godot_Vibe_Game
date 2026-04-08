@@ -13,6 +13,7 @@ signal autofill_finished
 @onready var backpack_widget = $UILayer/BackpackWidget
 @onready var drag_preview = $UILayer/DragPreview
 @onready var autofill_button = get_node_or_null("UILayer/AutofillButton")
+@onready var attempts_widget = get_node_or_null("UILayer/AttemptsWidget")
 
 @export_group("Ссылки на объекты")
 @export var cabinet: Node3D
@@ -85,6 +86,7 @@ func _ready():
 	if backpack_widget: backpack_widget.hide()
 	if drag_preview: drag_preview.hide()
 	if cabinet: cabinet.hide()
+	if attempts_widget: attempts_widget.hide()
 
 	if cabinet:
 		cabinet.all_rewards_collected_visually.connect(_on_all_rewards_collected_visually)
@@ -431,6 +433,7 @@ func start_game_flow():
 	outro.chain().tween_callback(func():
 		if side_widget: side_widget.start_appear_animation()
 		if backpack_widget: backpack_widget.start_appear_animation()
+		if attempts_widget: attempts_widget.start_appear_animation()
 		if autofill_button: autofill_button.modulate.a = 1.0; autofill_button.show()
 	)
 

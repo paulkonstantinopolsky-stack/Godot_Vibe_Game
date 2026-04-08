@@ -1,0 +1,47 @@
+[gd_scene format=3 uid="uid://bps6qpgxd7ibr"]
+
+[ext_resource type="Script" uid="uid://bg7qknjv05iq2" path="res://Scenes/attempts_widget.gd" id="1_5d5h6"]
+[ext_resource type="Texture2D" uid="uid://cosbvc4mwsqfq" path="res://Assets/2D/HeartIcon.png" id="1_5ltbg"]
+
+[node name="AttemptsWidget" type="Control" unique_id=524758923]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_right = -930.0
+offset_bottom = -2248.0
+grow_horizontal = 2
+grow_vertical = 2
+pivot_offset = Vector2(75, 76)
+script = ExtResource("1_5d5h6")
+
+[node name="HeartIcon" type="TextureRect" parent="." unique_id=769371456]
+custom_minimum_size = Vector2(152, 150)
+layout_mode = 0
+offset_right = 40.0
+offset_bottom = 40.0
+pivot_offset = Vector2(75, 76)
+texture = ExtResource("1_5ltbg")
+expand_mode = 1
+stretch_mode = 5
+
+[node name="CountLabel" type="Label" parent="HeartIcon" unique_id=209763103]
+layout_mode = 1
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -23.0
+offset_top = -56.0
+offset_right = 23.0
+offset_bottom = 54.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_colors/font_color = Color(1, 1, 1, 1)
+theme_override_colors/font_outline_color = Color(0.28627452, 0.03529412, 0.30980393, 1)
+theme_override_constants/outline_size = 12
+theme_override_font_sizes/font_size = 80
+text = "8"
+horizontal_alignment = 1
+vertical_alignment = 1
