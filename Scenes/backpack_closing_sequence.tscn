@@ -2,6 +2,8 @@
 
 [ext_resource type="Texture2D" uid="uid://q2vpmgtwyomj" path="res://Assets/Backpack_animation/B1.png" id="1_70f0a"]
 [ext_resource type="Script" uid="uid://dp65ba5ewwijg" path="res://Scenes/backpack_closing_sequence.gd" id="1_whixg"]
+[ext_resource type="Texture2D" uid="uid://bs3rfpen6gumk" path="res://Assets/2D/Stars_closing.png" id="3_hnvqb"]
+[ext_resource type="Texture2D" uid="uid://6mid46n72e3d" path="res://Assets/2D/hand_pointer.png" id="4_iqxby"]
 
 [node name="BackpackClosingSequence" type="Control" unique_id=1895647749]
 custom_minimum_size = Vector2(972, 1250)
@@ -15,6 +17,7 @@ grow_vertical = 2
 size_flags_horizontal = 4
 size_flags_vertical = 4
 script = ExtResource("1_whixg")
+strap_visual_distance = 750.0
 
 [node name="FrameDisplay" type="TextureRect" parent="." unique_id=1452396379]
 layout_mode = 1
@@ -40,3 +43,54 @@ offset_bottom = 193.5
 grow_horizontal = 2
 grow_vertical = 2
 metadata/_edit_use_anchors_ = true
+
+[node name="AffordanceUI" type="Control" parent="." unique_id=533066664]
+layout_mode = 1
+anchor_left = 0.5
+anchor_top = 0.0448
+anchor_right = 0.5
+anchor_bottom = 0.0448
+offset_left = -20.0
+offset_top = -20.0
+offset_right = 20.0
+offset_bottom = 20.0
+grow_horizontal = 2
+grow_vertical = 2
+metadata/_edit_use_anchors_ = true
+
+[node name="Stars" type="TextureRect" parent="AffordanceUI" unique_id=1356166597]
+custom_minimum_size = Vector2(581, 581)
+layout_mode = 1
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -290.5
+offset_top = -290.5
+offset_right = 290.5
+offset_bottom = 290.5
+grow_horizontal = 2
+grow_vertical = 2
+pivot_offset = Vector2(290.5, 290.5)
+texture = ExtResource("3_hnvqb")
+expand_mode = 1
+stretch_mode = 3
+metadata/_edit_use_anchors_ = true
+
+[node name="Hand" type="TextureRect" parent="AffordanceUI" unique_id=1381866221]
+layout_mode = 1
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -71.0
+offset_top = -60.0
+offset_right = 71.0
+offset_bottom = 146.0
+grow_horizontal = 2
+grow_vertical = 2
+texture = ExtResource("4_iqxby")
+expand_mode = 1
+stretch_mode = 3
