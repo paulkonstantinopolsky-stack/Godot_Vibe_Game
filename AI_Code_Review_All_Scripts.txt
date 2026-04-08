@@ -1,11 +1,99 @@
 ﻿AI Code Review Bundle - All GDScript Files
-Generated: 2026-04-08 16:55:02
+Generated: 2026-04-08 21:57:52
+Script count: 20
+
+
+============================================================
+SCRIPT: game_palette.gd
+PATH: res://game_palette.gd
+THESIS: Экспортируемая палитра цветов для ячеек и состояний паззла.
+-------------------- FULL SOURCE ---------------------------
+extends Resource
+class_name GamePalette
+
+@export_group("Puzzle Colors")
+@export var puz_normal_bg: Color = Color("#401E0D")
+@export var puz_normal_border: Color = Color("#5C3621")
+
+@export var puz_edit_unfocused_bg: Color = Color("#401E0D")
+@export var puz_edit_unfocused_border: Color = Color("#FFAE3C")
+
+@export var puz_edit_focused_bg: Color = Color("#5C3621")
+@export var puz_edit_focused_border: Color = Color("#ffffff")
+
+@export var puz_drag_valid_bg: Color = Color("#401E0D")
+@export var puz_drag_valid_border: Color = Color("#ffffff")
+
+@export_group("Cell Colors")
+@export var cell_default_bg: Color = Color(0, 0, 0, 0.2)
+@export var cell_default_border: Color = Color(0, 0, 0, 0)
+
+@export var cell_dashed_bg: Color = Color(0, 0, 0, 0.3)
+@export var cell_dashed_border: Color = Color("#5C3621")
+
+@export var cell_focused_bg: Color = Color(1, 1, 1, 0.2)
+@export var cell_focused_border: Color = Color("#ffffff")
+
+
+
+============================================================
+SCRIPT: item_card.gd
+PATH: res://item_card.gd
+THESIS: Мини-карточка в UI заказа: подставляет текстуру иконки.
+-------------------- FULL SOURCE ---------------------------
+extends Control
+
+func set_item(tex_path: String):
+	if has_node("Icon"):
+		$Icon.texture = load(tex_path)
+
+
+
+============================================================
+SCRIPT: item_data.gd
+PATH: res://item_data.gd
+THESIS: Ресурс ItemData: id, текстура, enum формы и выдача массива клеток shape.
+-------------------- FULL SOURCE ---------------------------
+extends Resource
+class_name ItemData
+
+enum ShapeType {
+	SINGLE,    # 1 РєР»РµС‚РєР°
+	DOUBLE_V,  # 2 РєР»РµС‚РєРё РІРµСЂС‚РёРєР°Р»СЊРЅРѕ
+	TRIPLE_V,  # 3 РєР»РµС‚РєРё РІРµСЂС‚РёРєР°Р»СЊРЅРѕ (Р»РёРЅРёСЏ)
+	SQUARE,    # 2Г—2
+}
+
+@export var id: int = 0
+@export var texture: Texture2D
+@export var shape_type: ShapeType = ShapeType.SINGLE
+
+# РЎРєСЂС‹РІР°РµРј СЃС‚Р°СЂС‹Р№ РјР°СЃСЃРёРІ, С‡С‚РѕР±С‹ РЅРµ СЃР»РѕРјР°С‚СЊ РєСЌС€ Godot, РЅРѕ СѓР±РёСЂР°РµРј РµРіРѕ СЃ РіР»Р°Р· РґРѕР»РѕР№
+var shape: Array[Vector2] = []
+
+func get_shape() -> Array:
+	match shape_type:
+		ShapeType.SINGLE:
+			return [Vector2(0, 0)]
+		ShapeType.DOUBLE_V:
+			return [Vector2(0, 0), Vector2(0, 1)]
+		ShapeType.TRIPLE_V:
+			return [Vector2(0, 0), Vector2(0, 1), Vector2(0, 2)]
+		ShapeType.SQUARE:
+			return [
+				Vector2(0, 0),
+				Vector2(1, 0),
+				Vector2(0, 1),
+				Vector2(1, 1),
+			]
+	return [Vector2(0, 0)]
+
 
 
 ============================================================
 SCRIPT: ItemManager.gd
 PATH: res://ItemManager.gd
-THESIS: Глобальный менеджер предметов: загрузка базы, генерация заказа, проверка предметов, комбо-логика и счетчик попыток.
+THESIS: Глобальный менеджер: база предметов, заказ, комбо, попытки, сигналы и генерация форм для паззлов.
 -------------------- FULL SOURCE ---------------------------
 extends Node
 
@@ -119,23 +207,38 @@ func mark_item_as_found(id: int) -> bool:
 			target_item = item
 			break
 
-	# 2. РЎРїРёСЃС‹РІР°РµРј РїРѕРїС‹С‚РєСѓ Р—РќРђРЇ СЃС‚Р°С‚СѓСЃ РїСЂРµРґРјРµС‚Р°
+	# 2. Р•СЃР»Рё РїСЂР°РІРёР»СЊРЅРѕ - СЃСЂР°Р·Сѓ РїРѕРјРµС‡Р°РµРј, С‡С‚РѕР±С‹ РїСЂРѕРІРµСЂРёС‚СЊ Р·Р°РІРµСЂС€РµРЅРЅРѕСЃС‚СЊ Р·Р°РєР°Р·Р°
+	var is_order_full = false
+	if is_correct:
+		target_item["found"] = true
+		is_order_full = true
+		for item in current_order:
+			if not item["found"]:
+				is_order_full = false
+				break
+
+	# 3. РЎРїРёСЃС‹РІР°РµРј РїРѕРїС‹С‚РєСѓ
 	if current_attempts > 0:
 		current_attempts -= 1
 		attempts_updated.emit(current_attempts, is_correct)
-		if current_attempts == 0:
+		# РљРћРќР¤Р›РРљРў РџРћРЎР›Р•Р”РќР•Р“Рћ РЁРђРќРЎРђ: РµСЃР»Рё 0, РЅРѕ Р·Р°РєР°Р· СЃРѕР±СЂР°РЅ - СЌС‚Рѕ РїРѕР±РµРґР°, Р° РЅРµ РїСЂРѕРёРіСЂС‹С€!
+		if current_attempts == 0 and not is_order_full:
 			out_of_attempts.emit()
 
-	# 3. РџСЂРёРјРµРЅСЏРµРј Р»РѕРіРёРєСѓ СѓСЃРїРµС…Р°
+	# 4. РџСЂРёРјРµРЅСЏРµРј Р»РѕРіРёРєСѓ СѓСЃРїРµС…Р°
 	if is_correct:
-		target_item["found"] = true
 		if not combo_failed:
 			combo_score += 1
 		item_found.emit(id)
-		_check_order_completion()
+
+		# Р•СЃР»Рё Р·Р°РєР°Р· РїРѕР»РЅРѕСЃС‚СЊСЋ СЃРѕР±СЂР°РЅ
+		if is_order_full:
+			level_completed.emit()
+			if not combo_failed:
+				perfect_clear_achieved.emit()
 		return true
 
-	# 4. Р›РѕРіРёРєР° РїСЂРѕРІР°Р»Р° (РРіСЂРѕРє РїРѕР»РѕР¶РёР» РјСѓСЃРѕСЂ)
+	# 5. Р›РѕРіРёРєР° РїСЂРѕРІР°Р»Р° (РРіСЂРѕРє РїРѕР»РѕР¶РёР» РјСѓСЃРѕСЂ)
 	if not is_correct and not combo_failed:
 		combo_failed = true
 		combo_score = 0
@@ -155,17 +258,6 @@ func unmark_item_as_found(id: int) -> void:
 
 				item_unfound.emit(id)
 			return
-
-func _check_order_completion() -> void:
-	var all_found := true
-	for item in current_order:
-		if not item["found"]:
-			all_found = false
-			break
-	if all_found:
-		level_completed.emit()
-		if not combo_failed:
-			perfect_clear_achieved.emit()
 
 func generate_new_order():
 	current_order.clear()
@@ -285,1248 +377,251 @@ func _rotate_shape_norm(shape: Array, rot: int) -> Array:
 
 
 ============================================================
-SCRIPT: item_data.gd
-PATH: res://item_data.gd
-THESIS: Ресурс предмета: хранит id/текстуру/тип формы и возвращает геометрию shape.
--------------------- FULL SOURCE ---------------------------
-extends Resource
-class_name ItemData
-
-enum ShapeType {
-	SINGLE,    # 1 РєР»РµС‚РєР°
-	DOUBLE_V,  # 2 РєР»РµС‚РєРё РІРµСЂС‚РёРєР°Р»СЊРЅРѕ
-	TRIPLE_V,  # 3 РєР»РµС‚РєРё РІРµСЂС‚РёРєР°Р»СЊРЅРѕ (Р»РёРЅРёСЏ)
-	SQUARE,    # 2Г—2
-}
-
-@export var id: int = 0
-@export var texture: Texture2D
-@export var shape_type: ShapeType = ShapeType.SINGLE
-
-# РЎРєСЂС‹РІР°РµРј СЃС‚Р°СЂС‹Р№ РјР°СЃСЃРёРІ, С‡С‚РѕР±С‹ РЅРµ СЃР»РѕРјР°С‚СЊ РєСЌС€ Godot, РЅРѕ СѓР±РёСЂР°РµРј РµРіРѕ СЃ РіР»Р°Р· РґРѕР»РѕР№
-var shape: Array[Vector2] = []
-
-func get_shape() -> Array:
-	match shape_type:
-		ShapeType.SINGLE:
-			return [Vector2(0, 0)]
-		ShapeType.DOUBLE_V:
-			return [Vector2(0, 0), Vector2(0, 1)]
-		ShapeType.TRIPLE_V:
-			return [Vector2(0, 0), Vector2(0, 1), Vector2(0, 2)]
-		ShapeType.SQUARE:
-			return [
-				Vector2(0, 0),
-				Vector2(1, 0),
-				Vector2(0, 1),
-				Vector2(1, 1),
-			]
-	return [Vector2(0, 0)]
-
-
-
-============================================================
-SCRIPT: item_card.gd
-PATH: res://item_card.gd
-THESIS: UI-карточка в письме заказа: выставляет иконку предмета по пути текстуры.
+SCRIPT: out_of_attempts_popup.gd
+PATH: res://out_of_attempts_popup.gd
+THESIS: Попап нехватки попыток: оверлей, контент, кнопки, твины открытия/закрытия (версия в корне/дубликат пути — см. PATH).
 -------------------- FULL SOURCE ---------------------------
 extends Control
 
-func set_item(tex_path: String):
-	if has_node("Icon"):
-		$Icon.texture = load(tex_path)
+signal popup_closed(action: String)
 
+@onready var overlay = get_node_or_null("Overlay")
+@onready var content_box = get_node_or_null("ContentBox")
+@onready var btn_close = get_node_or_null("ContentBox/BtnClose")
+@onready var btn_autofill = get_node_or_null("ContentBox/BtnAutofill")
 
+var _attempts_widget_ref: Control = null
+var _original_attempts_z_index: int = 0
 
-============================================================
-SCRIPT: game_palette.gd
-PATH: res://game_palette.gd
-THESIS: Палитра цветов интерфейса для разных состояний паззла и ячеек.
--------------------- FULL SOURCE ---------------------------
-extends Resource
-class_name GamePalette
-
-@export_group("Puzzle Colors")
-@export var puz_normal_bg: Color = Color("#401E0D")
-@export var puz_normal_border: Color = Color("#5C3621")
-
-@export var puz_edit_unfocused_bg: Color = Color("#401E0D")
-@export var puz_edit_unfocused_border: Color = Color("#FFAE3C")
-
-@export var puz_edit_focused_bg: Color = Color("#5C3621")
-@export var puz_edit_focused_border: Color = Color("#ffffff")
-
-@export var puz_drag_valid_bg: Color = Color("#401E0D")
-@export var puz_drag_valid_border: Color = Color("#ffffff")
-
-@export_group("Cell Colors")
-@export var cell_default_bg: Color = Color(0, 0, 0, 0.2)
-@export var cell_default_border: Color = Color(0, 0, 0, 0)
-
-@export var cell_dashed_bg: Color = Color(0, 0, 0, 0.3)
-@export var cell_dashed_border: Color = Color("#5C3621")
-
-@export var cell_focused_bg: Color = Color(1, 1, 1, 0.2)
-@export var cell_focused_border: Color = Color("#ffffff")
-
-
-
-============================================================
-SCRIPT: main_scene.gd
-PATH: res://Scenes/main_scene.gd
-THESIS: Главный контроллер раунда: запуск, таймер, drag-and-drop, автозаполнение, синхронизация UI/3D.
--------------------- FULL SOURCE ---------------------------
-extends Node3D
-
-signal autofill_finished
-
-@onready var order_popup = $UILayer/Order_PopUp
-@onready var env_back = $UILayer/Order_PopUp/EnvelopeBack
-@onready var env_front = $UILayer/Order_PopUp/EnvelopeFront
-@onready var letter = $UILayer/Order_PopUp/LetterContainer
-@onready var start_button = $UILayer/Start_Button
-@onready var ready_button = $UILayer/Ready_Button
-@onready var timer_label = $UILayer/Order_PopUp/LetterContainer/LetterPaper/Timer
-@onready var side_widget = $UILayer/SideWidget
-@onready var backpack_widget = $UILayer/BackpackWidget
-@onready var drag_preview = $UILayer/DragPreview
-@onready var autofill_button = get_node_or_null("UILayer/AutofillButton")
-@onready var attempts_widget = get_node_or_null("UILayer/AttemptsWidget")
-
-@export_group("РЎСЃС‹Р»РєРё РЅР° РѕР±СЉРµРєС‚С‹")
-@export var cabinet: Node3D
-
-@export_group("РќР°СЃС‚СЂРѕР№РєРё Р’СЂРµРјРµРЅРё")
-@export var total_time: float = 10.0
-
-@export_group("РљРѕРЅРІРµСЂС‚ (Envelope)")
-@export var env_intro_fade: float = 0.2
-@export var env_intro_start_y: float = 2300.0
-@export var env_intro_end_y: float = 1800.0
-@export var env_intro_duration: float = 1.0
-@export var env_intro_trans: Tween.TransitionType = Tween.TRANS_CIRC
-@export var env_intro_ease: Tween.EaseType = Tween.EASE_OUT
-@export var env_outro_fade: float = 0.3
-@export var env_outro_end_y: float = 2300.0
-@export var env_outro_duration: float = 0.8
-@export var env_outro_trans: Tween.TransitionType = Tween.TRANS_CIRC
-@export var env_outro_ease: Tween.EaseType = Tween.EASE_IN
-
-@export_group("РџРёСЃСЊРјРѕ (Letter)")
-@export var let_intro_delay: float = 0.3
-@export var let_intro_fade: float = 0.2
-@export var let_intro_start_y: float = -2000.0
-@export var let_intro_end_y: float = 500.0 
-@export var let_intro_start_scale_y: float = 0.1
-@export var let_intro_end_scale_y: float = 1.0
-@export var let_intro_duration: float = 0.5
-@export var let_intro_trans: Tween.TransitionType = Tween.TRANS_CIRC
-@export var let_intro_ease: Tween.EaseType = Tween.EASE_OUT
-@export var let_outro_delay: float = 0.0
-@export var let_outro_fade: float = 0.3
-@export var let_outro_end_y: float = -2000.0
-@export var let_outro_start_scale_y: float = 1.0
-@export var let_outro_end_scale_y: float = 0.5
-@export var let_outro_duration: float = 0.5
-@export var let_outro_trans: Tween.TransitionType = Tween.TRANS_CIRC
-@export var let_outro_ease: Tween.EaseType = Tween.EASE_IN
-
-var time_left: float
-var is_timer_active: bool = false
-var is_game_started: bool = false
-
-var potential_drag_id: int = -1
-var potential_drag_tex: String = ""
-var potential_drag_node: Node3D = null 
-var current_drag_node: Node3D = null   
-var drag_start_pos: Vector2 = Vector2.ZERO
-const DRAG_THRESHOLD: float = 15.0 
-
-var cinematic_queue: int = 0
-var is_cinematic_playing: bool = false
-var is_autofill_animating: bool = false
-var fast_cinematic_count: int = 0
-var autofill_cab_tween: Tween
-
-func _ready():
-	ItemManager.reset_level_state()
-
-	if start_button: start_button.pressed.connect(_on_start_pressed)
-	if ready_button: ready_button.pressed.connect(_on_ready_pressed)
-	if autofill_button:
-		autofill_button.pressed.connect(_on_autofill_pressed)
-		autofill_button.hide()
+func _ready() -> void:
+	hide()
 	
-	ready_button.modulate.a = 0.0; ready_button.hide()
-	env_back.modulate.a = 0.0; env_front.modulate.a = 0.0; letter.modulate.a = 0.0
+	if overlay: overlay.color.a = 0.0
+	if content_box: content_box.scale = Vector2(0.5, 0.0) 
+	if btn_close: btn_close.modulate.a = 0.0
+	if btn_autofill: btn_autofill.modulate.a = 0.0
 	
-	if side_widget: side_widget.hide()
-	if backpack_widget: backpack_widget.hide()
-	if drag_preview: drag_preview.hide()
-	if cabinet: cabinet.hide()
-	if attempts_widget: attempts_widget.hide()
+	if btn_close: btn_close.pressed.connect(_on_close_pressed)
+	if btn_autofill: btn_autofill.pressed.connect(_on_autofill_pressed)
 
-	if cabinet:
-		cabinet.all_rewards_collected_visually.connect(_on_all_rewards_collected_visually)
+func open_popup(attempts_widget: Control = null) -> void:
+	show()
+	z_index = 300
+	if attempts_widget and is_instance_valid(attempts_widget):
+		_attempts_widget_ref = attempts_widget
+		_original_attempts_z_index = attempts_widget.z_index
+		attempts_widget.z_index = 301 
+	
+	var tw = create_tween().bind_node(self)
+	if overlay:
+		tw.parallel().tween_property(overlay, "color:a", 0.85, 0.35).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+	if content_box:
+		tw.parallel().tween_property(content_box, "scale", Vector2.ONE, 0.45).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	
+	if btn_close:
+		tw.chain().tween_property(btn_close, "modulate:a", 1.0, 0.2).set_trans(Tween.TRANS_SINE)
+	if btn_autofill:
+		tw.parallel().tween_property(btn_autofill, "modulate:a", 1.0, 0.2).set_trans(Tween.TRANS_SINE)
 
-	ItemManager.item_pressed.connect(_on_item_pressed)
-
-	ItemManager.perfect_clear_achieved.connect(_on_perfect_clear)
-	ItemManager.level_completed.connect(func(): print("Level finished!"))
-	ItemManager.combo_broken.connect(_on_combo_broken)
-	ItemManager.item_unfound.connect(_on_item_unfound)
-
-func _on_item_unfound(id: int):
-	if not side_widget:
-		return
-	var items_container = side_widget.items_container
-	var flipped_entries = []
-	for entry in items_container.get_children():
-		if int(entry.item_id) == int(id) and entry.get_meta("is_flipped", false):
-			flipped_entries.append(entry)
-
-	if flipped_entries.size() > 0:
-		var entry = flipped_entries.back()
-		entry.flip_to_back()
-		entry.set_meta("is_flipped", false)
-
-func _on_all_rewards_collected_visually() -> void:
-	if backpack_widget and backpack_widget.has_method("start_order_completed_sequence"):
-		backpack_widget.start_order_completed_sequence()
-
-func _on_combo_broken() -> void:
-	if side_widget and side_widget.has_node("ComboWidget"):
-		var cw = side_widget.get_node("ComboWidget")
-		if cw.has_method("show_fail"):
-			cw.show_fail()
-
-func _on_perfect_clear() -> void:
-	if is_autofill_animating:
-		await autofill_finished
-
-	var popup: Control = load("res://Scenes/perfect_popup.gd").new() as Control
-	popup.z_index = 400
-	$UILayer.add_child(popup)
-	popup.set_anchors_preset(Control.PRESET_FULL_RECT)
-	popup.play_animation(func():
-		cinematic_queue = 3
-		_play_next_cinematic()
-	)
-
-	# РќРµС‚ С€РєР°С„Р° вЂ” СЃРёРіРЅР°Р»Р° all_rewards_collected_visually РЅРµ Р±СѓРґРµС‚; РІР·Р»С‘С‚ С‡РµСЂРµР· 1СЃ РїРѕСЃР»Рµ РїРѕСЏРІР»РµРЅРёСЏ Perfect
-	if cabinet == null:
-		get_tree().create_timer(1.0).timeout.connect(_on_all_rewards_collected_visually)
-
-func _process(delta):
-	if is_timer_active and time_left > 0:
-		time_left -= delta
-		if timer_label: timer_label.text = str(ceil(time_left)) + "s"
-		if time_left <= 0: _on_timer_timeout()
-			
-	if cinematic_queue > 0 and not is_cinematic_playing and not ItemManager.is_dragging_item and not is_autofill_animating:
-		_play_next_cinematic()
-
-func _play_next_cinematic():
-	is_cinematic_playing = true
-	cinematic_queue -= 1
-	if cabinet and cabinet.has_method("reveal_next_bonus_cell"):
-		var use_fast = fast_cinematic_count > 0
-		if use_fast:
-			fast_cinematic_count -= 1
-		if cabinet.has_method("set_bonus_reveal_speed_multiplier"):
-			cabinet.set_bonus_reveal_speed_multiplier(2.0 if use_fast else 1.0)
-		if cabinet.has_method("set_bonus_post_open_delay_multiplier"):
-			cabinet.set_bonus_post_open_delay_multiplier(2.0 if use_fast else 1.0)
-		if cabinet.has_method("set_bonus_fixed_post_open_delay"):
-			cabinet.set_bonus_fixed_post_open_delay(0.25 if use_fast else -1.0)
-		cabinet.reveal_next_bonus_cell(func(): is_cinematic_playing = false)
-	else:
-		is_cinematic_playing = false
-
-func _find_cabinet_item_node(parent_node: Node, target_id: int, ignore_list: Array = []) -> Node3D:
-	if parent_node == null:
-		return null
-	if not parent_node in ignore_list:
-		if "id" in parent_node and parent_node.get("id") == target_id: return parent_node as Node3D
-		if "item_id" in parent_node and parent_node.get("item_id") == target_id: return parent_node as Node3D
-	for child in parent_node.get_children():
-		var found = _find_cabinet_item_node(child, target_id, ignore_list)
-		if found: return found
-	return null
-
-func _on_autofill_pressed():
-	if not is_game_started or not backpack_widget or is_cinematic_playing or is_autofill_animating: return
-	if ItemManager.is_dragging_item or backpack_widget.is_dragging_internal: return
-
-	# РЎРћР‘РР РђР•Рњ Р Р•РђР›Р¬РќР«Р• Р”РђРќРќР«Р• РР— РЁРљРђР¤Рђ
-	var required_data = []
-	var used_cab_nodes = []
-	for task in ItemManager.current_order:
-		if not task["found"]:
-			var id = task["id"]
-			var cab_node = _find_cabinet_item_node(cabinet, id, used_cab_nodes)
-			var actual_shape = []
-
-			# Р‘РµСЂРµРј СЃРіРµРЅРµСЂРёСЂРѕРІР°РЅРЅСѓСЋ С„РѕСЂРјСѓ РїСЂСЏРјРѕ РёР· 3D-РїСЂРµРґРјРµС‚Р°
-			if cab_node and cab_node.has_meta("puzzle_shape"):
-				actual_shape = cab_node.get_meta("puzzle_shape")
-				used_cab_nodes.append(cab_node)
-			else:
-				actual_shape = ItemManager.items_db[id].get("shape", [Vector2.ZERO])
-
-			required_data.append({
-				"id": id,
-				"shape": actual_shape,
-				"cab_node": cab_node
-			})
-
-	if required_data.size() == 0: return
-
-	# РџР•Р Р•Р”РђР•Рњ Р Р•РђР›Р¬РќР«Р• Р”РђРќРќР«Р• Р’ Р Р®РљР—РђРљ
-	var placements = backpack_widget.auto_fill_and_optimize(required_data)
-	if placements.size() == 0: return
-
-	is_autofill_animating = true
-
-	var fly_data_array = []
-	for place_data in placements:
-		var cab_node = place_data["cab_node"]
-		fly_data_array.append({
-			"id": place_data["id"],
-			"cell": place_data["cell"],
-			"cab_node": cab_node,
-			"start_y": cab_node.global_position.y if cab_node else -9999.0
-		})
-		if cab_node and is_instance_valid(cab_node) and is_instance_valid(place_data["cell"]):
-			place_data["cell"].set_meta("source_drag_node", cab_node)
-
-	fly_data_array.sort_custom(func(a, b): return a["start_y"] > b["start_y"])
-
-	var total_anim_time = 1.0 + (fly_data_array.size() * 0.15)
-	if cabinet:
-		if autofill_cab_tween and autofill_cab_tween.is_running():
-			autofill_cab_tween.kill()
-		autofill_cab_tween = create_tween().bind_node(self).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
-		autofill_cab_tween.tween_property(cabinet, "rotation_degrees:y", cabinet.rotation_degrees.y + 720.0, total_anim_time)
-
-	var cam = get_viewport().get_camera_3d()
-	var queue_before = cinematic_queue
-	for i in range(fly_data_array.size()):
-		var data = fly_data_array[i]
-		var id = data["id"]; var target_cell = data["cell"]; var cab_node = data["cab_node"]
-
-		ItemManager.mark_item_as_found(id)
-
-		var target_pos = target_cell.global_position
-		var target_rot = target_cell.get_meta("rot_deg", 0)
-		var target_shape = target_cell.get_meta("current_shape")
-
-		# Р“РµРЅРµСЂРёСЂСѓРµРј РїРѕР»РЅРѕС†РµРЅРЅС‹Р№ РїР°Р·Р·Р» С‡РµСЂРµР· СЂСЋРєР·Р°Рє
-		var fly_icon = backpack_widget.create_standalone_puzzle_visual(id, target_shape, target_rot)
-		fly_icon.z_index = 100
-		fly_icon.modulate.a = 0.0
-		$UILayer.add_child(fly_icon)
-
-		var start_tw = create_tween().bind_node(self)
-		start_tw.tween_interval(i * 0.15)
-		start_tw.tween_callback(func():
-			var start_pos = get_viewport().get_visible_rect().size / 2.0
-			if cab_node:
-				if cab_node.has_method("hide_item"): cab_node.hide_item()
-				else: cab_node.hide()
-				if cam: start_pos = cam.unproject_position(cab_node.global_position)
-
-			fly_icon.global_position = start_pos - (fly_icon.size / 2.0)
-			fly_icon.scale = Vector2(0.2, 0.2) # Р’С‹Р»РµС‚Р°РµС‚ РјР°Р»РµРЅСЊРєРёРј РёР· С€РєР°С„Р°
-			fly_icon.modulate.a = 1.0
-
-			var anim_tw = create_tween().bind_node(self).set_parallel(true).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
-			anim_tw.tween_property(fly_icon, "global_position", target_pos, 0.4)
-			anim_tw.tween_property(fly_icon, "scale", Vector2.ONE, 0.4)
-			# Р’СЂР°С‰РµРЅРёРµ РЅРµ РЅСѓР¶РЅРѕ, С‚Р°Рє РєР°Рє С„РѕСЂРјР° РїР°Р·Р·Р»Р° СѓР¶Рµ РїРѕРІРµСЂРЅСѓС‚Р° РїСЂР°РІРёР»СЊРЅРѕ РІРЅСѓС‚СЂРё РєРѕРЅС‚РµР№РЅРµСЂР°
-
-			anim_tw.chain().tween_callback(func():
-				fly_icon.queue_free()
-				if is_instance_valid(target_cell):
-					# РЎРЅРёРјР°РµРј С„Р»Р°Рі РѕР¶РёРґР°РЅРёСЏ
-					target_cell.set_meta("hide_bg_until_land", false)
-
-					if target_cell.has_node("ItemIcon"):
-						target_cell.get_node("ItemIcon").show()
-
-					# Р’РђР–РќРћ: Р’С‹Р·С‹РІР°РµРј РѕР±РЅРѕРІР»РµРЅРёРµ РІРёР·СѓР°Р»Р° СЂСЋРєР·Р°РєР°, С‡С‚РѕР±С‹ РІРµСЂРЅСѓС‚СЊ С„РѕРЅ
-					if backpack_widget and backpack_widget.has_method("_update_grid_visuals"):
-						backpack_widget._update_grid_visuals()
-			)
-		)
-	var added_cinematics = cinematic_queue - queue_before
-	if added_cinematics > 0:
-		fast_cinematic_count += added_cinematics
-
-	if autofill_button:
-		var tw = create_tween().bind_node(self).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
-		tw.tween_property(autofill_button, "modulate:a", 0.0, 0.3)
-		tw.tween_callback(autofill_button.hide)
+func _close_popup(action: String) -> void:
+	if btn_close: btn_close.disabled = true
+	if btn_autofill: btn_autofill.disabled = true
+	
+	var tw = create_tween().bind_node(self)
+	
+	if btn_close:
+		tw.parallel().tween_property(btn_close, "modulate:a", 0.0, 0.15).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN)
+	if btn_autofill:
+		tw.parallel().tween_property(btn_autofill, "modulate:a", 0.0, 0.15).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN)
+	
+	if content_box:
+		tw.chain().tween_property(content_box, "scale", Vector2(0.5, 0.0), 0.25).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_IN)
+	if overlay:
+		tw.parallel().tween_property(overlay, "color:a", 0.0, 0.25).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN)
+	
+	tw.chain().tween_callback(func():
+		if _attempts_widget_ref and is_instance_valid(_attempts_widget_ref):
+			_attempts_widget_ref.z_index = _original_attempts_z_index
 		
-	get_tree().create_timer(total_anim_time).timeout.connect(func():
-		is_autofill_animating = false
-		autofill_finished.emit()
+		hide()
+		popup_closed.emit(action)
+		queue_free()
 	)
 
-func _on_item_pressed(id: int, tex: String, node: Node3D):
-	if is_cinematic_playing: return
-	potential_drag_id = id; potential_drag_tex = tex; potential_drag_node = node
-	drag_start_pos = get_viewport().get_mouse_position()
+func _on_close_pressed() -> void:
+	_close_popup("continue")
 
-func _input(event):
-	if is_cinematic_playing: return 
-	
-	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and not event.pressed:
-		if potential_drag_id != -1:
-			if ItemManager.is_dragging_item: _perform_drop()
-			else: _reset_drag_instant() 
+func _on_autofill_pressed() -> void:
+	_close_popup("autofill")
 
-	if event is InputEventMouseMotion and potential_drag_id != -1:
-		if not ItemManager.is_dragging_item:
-			var diff = event.position - drag_start_pos
-			if diff.length() > DRAG_THRESHOLD:
-				if abs(diff.y) > abs(diff.x): _start_drag() 
-				else: _reset_drag_instant() 
-		else:
-			if backpack_widget and backpack_widget.has_method("update_external_drag_preview"):
-				backpack_widget.update_external_drag_preview(event.position)
-
-func _start_drag():
-	ItemManager.is_dragging_item = true
-	current_drag_node = potential_drag_node
-	if cabinet and cabinet.has_method("focus_item_face_to_camera") and current_drag_node and not is_cinematic_playing:
-		cabinet.focus_item_face_to_camera(current_drag_node, 0.35)
-	if current_drag_node and current_drag_node.has_method("hide_item"): current_drag_node.hide_item()
-	if drag_preview: drag_preview.hide()
-	if backpack_widget and backpack_widget.has_method("show_external_drag_preview"):
-		var shape_to_draw: Array
-		if current_drag_node and current_drag_node.has_meta("puzzle_shape"):
-			shape_to_draw = current_drag_node.get_meta("puzzle_shape")
-		else:
-			shape_to_draw = ItemManager.items_db[potential_drag_id].get("shape", [Vector2.ZERO])
-		backpack_widget.show_external_drag_preview(
-			potential_drag_id,
-			get_viewport().get_mouse_position(),
-			shape_to_draw
-		)
-
-func _perform_drop():
-	var mouse_pos = get_viewport().get_mouse_position()
-	var dropped_successfully = false
-
-	if backpack_widget:
-		var forgiving_drop_zone = backpack_widget.get_global_rect().grow(200.0)
-		if forgiving_drop_zone.has_point(mouse_pos):
-			if backpack_widget.has_method("try_add_item"):
-				dropped_successfully = backpack_widget.try_add_item(potential_drag_id, mouse_pos, potential_drag_node)
-
-	if dropped_successfully:
-		current_drag_node = null
-		_reset_drag_instant()
-	else:
-		_fly_back_and_cancel()
-
-func _fly_back_and_cancel():
-	if autofill_cab_tween and autofill_cab_tween.is_running(): autofill_cab_tween.kill()
-	if backpack_widget and backpack_widget.has_method("hide_external_drag_preview"): backpack_widget.hide_external_drag_preview()
-	var node_to_return = current_drag_node
-	if node_to_return and is_instance_valid(node_to_return):
-		var tex_path = potential_drag_tex
-		var fly_icon = TextureRect.new()
-		if potential_drag_id != -1 and ItemManager.items_db.has(potential_drag_id):
-			fly_icon.texture = ItemManager.items_db[potential_drag_id].get("texture_res")
-		if fly_icon.texture == null:
-			fly_icon.texture = load(tex_path)
-		fly_icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-		fly_icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-		fly_icon.size = fly_icon.texture.get_size() if fly_icon.texture else Vector2(100, 100)
-		fly_icon.pivot_offset = fly_icon.size / 2.0
-		fly_icon.global_position = get_viewport().get_mouse_position() - fly_icon.pivot_offset
-		fly_icon.z_index = 100
-		$UILayer.add_child(fly_icon)
-
-		if drag_preview: drag_preview.hide()
-
-		const FOCUS_DURATION := 0.2
-		if cabinet and cabinet.has_method("focus_item_face_to_camera") and node_to_return and not is_cinematic_playing:
-			cabinet.focus_item_face_to_camera(node_to_return, FOCUS_DURATION, true)
-
-		var local_fly_tween = create_tween().bind_node(self).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
-		local_fly_tween.tween_interval(FOCUS_DURATION)
-		local_fly_tween.tween_callback(_run_fly_icon_return_after_focus.bind(fly_icon, node_to_return))
-	current_drag_node = null
-	potential_drag_id = -1; potential_drag_node = null; ItemManager.is_dragging_item = false
-
-func _reset_drag_instant():
-	potential_drag_id = -1; potential_drag_node = null; ItemManager.is_dragging_item = false; _hide_preview_only()
-
-func _hide_preview_only():
-	if backpack_widget and backpack_widget.has_method("hide_external_drag_preview"): backpack_widget.hide_external_drag_preview()
-	if drag_preview: drag_preview.hide(); drag_preview.texture = null
-	if current_drag_node and current_drag_node.has_method("show_item"): current_drag_node.show_item()
-	current_drag_node = null
-
-func _on_start_pressed():
-	start_button.hide()
-	ItemManager.generate_new_order()
-	if order_popup.has_method("fill_order_icons"): order_popup.fill_order_icons()
-	is_game_started = false; time_left = total_time
-	
-	order_popup.position.y = env_intro_start_y; letter.position.y = let_intro_start_y; letter.scale.y = let_intro_start_scale_y
-	var tween = create_tween().bind_node(self).set_parallel(true)
-	tween.tween_property(order_popup, "position:y", env_intro_end_y, env_intro_duration).set_trans(env_intro_trans).set_ease(env_intro_ease)
-	tween.tween_property(env_back, "modulate:a", 1.0, env_intro_fade); tween.tween_property(env_front, "modulate:a", 1.0, env_intro_fade)
-	tween.tween_property(letter, "position:y", let_intro_end_y, let_intro_duration).set_trans(let_intro_trans).set_ease(let_intro_ease).set_delay(let_intro_delay)
-	tween.tween_property(letter, "scale:y", let_intro_end_scale_y, let_intro_duration).set_trans(let_intro_trans).set_ease(let_outro_ease).set_delay(let_intro_delay)
-	tween.tween_property(letter, "modulate:a", 1.0, let_intro_fade).set_delay(let_intro_delay)
-	
-	await get_tree().create_timer(let_intro_delay + let_intro_duration).timeout
-	if !is_game_started: ready_button.show(); create_tween().bind_node(self).tween_property(ready_button, "modulate:a", 1.0, 0.2); is_timer_active = true
-
-func _on_ready_pressed():
-	if is_game_started: return
-	is_timer_active = false; start_game_flow()
-
-func _on_timer_timeout():
-	if is_game_started: return
-	is_timer_active = false; start_game_flow()
-
-func start_game_flow():
-	is_game_started = true; ready_button.disabled = true
-	if cabinet: cabinet.build_cabinet_tornado()
-	var outro = create_tween().bind_node(self).set_parallel(true)
-	outro.tween_property(order_popup, "position:y", env_outro_end_y, env_outro_duration).set_trans(env_outro_trans).set_ease(env_outro_ease)
-	outro.tween_property(env_back, "modulate:a", 0.0, env_outro_fade); outro.tween_property(env_front, "modulate:a", 0.0, env_outro_fade)
-	outro.tween_property(letter, "position:y", let_outro_end_y, let_outro_duration).set_trans(let_outro_trans).set_ease(let_outro_ease).set_delay(let_outro_delay)
-	outro.tween_property(letter, "scale:y", let_outro_end_scale_y, let_outro_duration).set_trans(let_outro_trans).set_ease(let_outro_ease).set_delay(let_outro_delay)
-	outro.tween_property(letter, "modulate:a", 0.0, let_outro_fade).set_delay(let_outro_delay)
-	outro.tween_property(ready_button, "modulate:a", 0.0, let_outro_fade)
-	
-	outro.chain().tween_callback(ready_button.hide)
-	outro.chain().tween_callback(func():
-		if side_widget: side_widget.start_appear_animation()
-		if backpack_widget: backpack_widget.start_appear_animation()
-		if attempts_widget: attempts_widget.start_appear_animation()
-		if autofill_button: autofill_button.modulate.a = 1.0; autofill_button.show()
-	)
-
-func _run_fly_icon_return_after_focus(fly_icon: TextureRect, drag_node: Node3D) -> void:
-	var cam = get_viewport().get_camera_3d()
-	var target_pos = drag_start_pos - fly_icon.pivot_offset
-
-	if cam and drag_node and is_instance_valid(drag_node):
-		# РџР РћР’Р•Р РљРђ РќРђ РџРћР—РР¦РР® Р—Рђ РљРђРњР•Р РћР™
-		if cam.is_position_behind(drag_node.global_position):
-			fly_icon.queue_free()
-			if drag_node.has_method("show_item"): drag_node.show_item()
-			else: drag_node.show()
-			return
-
-		target_pos = cam.unproject_position(drag_node.global_position) - fly_icon.pivot_offset
-
-	var local_inner_tween = create_tween().bind_node(self).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
-	local_inner_tween.tween_property(fly_icon, "global_position", target_pos, 0.3)
-	local_inner_tween.tween_callback(func():
-		fly_icon.queue_free()
-		if drag_node and is_instance_valid(drag_node):
-			if drag_node.has_method("show_item"): drag_node.show_item()
-			else: drag_node.show()
-	)
-
-func fly_back_to_cabinet(item_id: int, start_pos: Vector2, drag_node: Node3D, skip_unmark: bool = false):
-	const FOCUS_DURATION := 0.2
-	if item_id == -1: ItemManager.is_dragging_item = false; return
-
-	# РџСЂРѕРїСѓСЃРєР°РµРј СЃРЅСЏС‚РёРµ С„Р»Р°РіР°, РµСЃР»Рё СЌС‚Рѕ РґРµР»Р°РµС‚ Autofill (РѕС‡РёСЃС‚РєР° РјСѓСЃРѕСЂР°)
-	if not skip_unmark:
-		ItemManager.unmark_item_as_found(item_id)
-
-	if autofill_cab_tween and autofill_cab_tween.is_running(): autofill_cab_tween.kill()
-	ItemManager.is_dragging_item = false
-	if not ItemManager.items_db.has(item_id):
-		if drag_node and is_instance_valid(drag_node):
-			if drag_node.has_method("show_item"): drag_node.show_item()
-			else: drag_node.show()
-		return
-	var db_entry = ItemManager.items_db[item_id]
-	var fly_icon = TextureRect.new()
-	fly_icon.texture = db_entry.get("texture_res")
-	if fly_icon.texture == null and db_entry.get("texture", "") != "":
-		fly_icon.texture = load(db_entry["texture"])
-	fly_icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-	fly_icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-	fly_icon.size = fly_icon.texture.get_size() if fly_icon.texture else Vector2(100, 100)
-	fly_icon.pivot_offset = fly_icon.size / 2.0
-	fly_icon.global_position = start_pos - fly_icon.pivot_offset
-	fly_icon.z_index = 100
-	$UILayer.add_child(fly_icon)
-
-	if drag_preview: drag_preview.hide()
-
-	if cabinet and cabinet.has_method("focus_item_face_to_camera") and drag_node and not is_cinematic_playing:
-		cabinet.focus_item_face_to_camera(drag_node, FOCUS_DURATION, true)
-
-	var local_fly_tween = create_tween().bind_node(self).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
-	local_fly_tween.tween_interval(FOCUS_DURATION)
-	local_fly_tween.tween_callback(_run_fly_icon_return_after_focus.bind(fly_icon, drag_node))
 
 
 ============================================================
-SCRIPT: cabinet.gd
-PATH: res://Scenes/cabinet.gd
-THESIS: 3D-шкаф: генерация и анимация ячеек, вращение, открытие бонусов и последовательность монет.
+SCRIPT: attempts_widget.gd
+PATH: res://Scenes/attempts_widget.gd
+THESIS: Счётчик попыток: подписка на ItemManager, пульс и glint при изменении.
 -------------------- FULL SOURCE ---------------------------
-extends Node3D
+extends Control
 
-const COLUMNS: int = 8
-const STEP_ANGLE: float = deg_to_rad(45.0)
-const ROWS: int = 5
-const CELL_HEIGHT: float = 1.25
-const VERTICAL_SPACING: float = 1.6
-const BLENDER_RADIUS: float = 1.88
-const CAP_FIT_RADIUS: float = 1.9
-const CAP_BOTTOM_Y: float = -1.3
-const CAP_TOP_Y_MARGIN: float = 0.0
+@onready var heart_icon = $HeartIcon
+@onready var count_label = $HeartIcon/CountLabel
 
-@export_group("РџР°СЂР°РјРµС‚СЂС‹ Р°РЅРёРјР°С†РёРё")
-@export var cell_fly_duration: float = 1.2
-@export var spawn_distance_min: float = 15.0
-@export var spawn_distance_max: float = 30.0
-@export var total_rotation_degrees: float = 360.0
-
-@export_group("РџРѕСЌС‚Р°РїРЅР°СЏ СЃР±РѕСЂРєР°")
-@export var delay_between_rows: float = 0.2
-@export var delay_between_cells_in_row: float = 0.05
-
-@export_group("Р“Р•РћРњР•РўР РРЇ (РЎС‚С‹РєРѕРІРєР°)")
-@export var width_scale: float = 1.01
-@export var geometric_radial_offset: float = 0.0
-@export var manual_mesh_width: float = 2.0
-
-@export_group("РРЅС‚РµСЂРїРѕР»СЏС†РёСЏ")
-@export var trans_type: Tween.TransitionType = Tween.TRANS_CUBIC
-@export var ease_type: Tween.EaseType = Tween.EASE_OUT
-
-@export_group("Inertia Physics")
-@export var swipe_sensitivity: float = 0.5
-@export var max_angular_velocity: float = 25.0
-@export var friction: float = 3.0
-@export var snap_threshold: float = 2.0
-@export var snap_duration: float = 0.25
-@export var face_angle_step: float = 45.0
-
-@export_group("РҐР°РїС‚РёРє (РЎРµР№С„)")
-@export var haptics_enabled: bool = true
-@export var haptic_click_ms: int = 10
-
-const SNAP_ANGLE_EPS: float = 0.01
-
-var can_rotate: bool = false
-var is_dragging: bool = false
-## РЎРєРѕСЂРѕСЃС‚СЊ РІ РіСЂР°РґСѓСЃР°С… Р·Р° РєР°РґСЂ (_physics-like РґР»СЏ РёРЅРµСЂС†РёРё)
-var angular_velocity: float = 0.0
-## РўРµРєСѓС‰РёР№ yaw РІ РіСЂР°РґСѓСЃР°С… (СЃРёРЅС…СЂРѕРЅ СЃ rotation_degrees.y)
-var current_rotation_y: float = 0.0
-var snap_tween: Tween
-var last_haptic_index: int = 0
-
-var red_cell_scene = preload("res://Scenes/Cell_Red.tscn")
-var green_cell_scene = preload("res://Scenes/Cell_Green.tscn")
-var cap_scene = preload("res://Scenes/Top_Down.tscn")
-var item_3d_scene = preload("res://Scenes/Item_3d.tscn")
-
-var active_red_cells = []
-var focus_tween: Tween
-var bonus_reveal_speed_multiplier: float = 1.0
-
-# --- РџРѕСЃР»РµРґРѕРІР°С‚РµР»СЊРЅРѕСЃС‚СЊ СЃР±РѕСЂР° РјРѕРЅРµС‚ ---
-var unlocked_coin_cols: Array = []  # РћС‚СЃРѕСЂС‚РёСЂРѕРІР°РЅРЅС‹Р№ СЃРїРёСЃРѕРє РєРѕР»РѕРЅРѕРє СЃ РѕС‚РєСЂС‹С‚С‹РјРё РјРѕРЅРµС‚Р°РјРё
-var coin_seq_tween: Tween
-var bonus_post_open_delay_multiplier: float = 1.0
-var bonus_fixed_post_open_delay: float = -1.0
-
-var _is_first_bonus_reveal: bool = true
-## РЎРєРѕР»СЊРєРѕ РєСЂР°СЃРЅС‹С… Р±РѕРЅСѓСЃРЅС‹С… СЏС‡РµРµРє Р±С‹Р»Рѕ РїРѕСЃР»Рµ СЃР±РѕСЂРєРё С€РєР°С„Р° (РґРѕ pop_front РІ reveal)
-var _bonus_red_cell_count: int = 0
-var _no_bonus_complete_timer: SceneTreeTimer
-var _reward_session_id: int = 0
-var _no_bonus_close_pending: bool = false
-
-## Р’СЃРµ Р±РѕРЅСѓСЃРЅС‹Рµ РјРѕРЅРµС‚С‹ СЃРѕР±СЂР°РЅС‹ (РїРѕСЃР»РµРґРЅСЏСЏ СѓР±СЂР°РЅР° РёР· РѕС‡РµСЂРµРґРё)
-signal all_bonus_coins_collected
-## РџРѕСЃР»РµРґРЅСЏСЏ РјРѕРЅРµС‚Р° РІРёР·СѓР°Р»СЊРЅРѕ РґРѕР»РµС‚РµР»Р° РґРѕ РєРѕРЅС†Р° Р°РЅРёРјР°С†РёРё РїРѕР»С‘С‚Р°
-signal all_rewards_collected_visually
-
-var _coins_in_flight: int = 0
-var is_level_finished: bool = false
-
-func set_bonus_reveal_speed_multiplier(mult: float) -> void:
-	bonus_reveal_speed_multiplier = max(mult, 0.01)
-
-func set_bonus_post_open_delay_multiplier(mult: float) -> void:
-	bonus_post_open_delay_multiplier = max(mult, 0.01)
-
-func set_bonus_fixed_post_open_delay(seconds: float) -> void:
-	bonus_fixed_post_open_delay = seconds
+var pulse_tween: Tween
+var _shader_mat: ShaderMaterial
 
 func _ready() -> void:
 	hide()
 
-func _process(delta: float) -> void:
-	if is_level_finished:
-		return
-	if not can_rotate:
-		return
+	if not ItemManager.attempts_updated.is_connected(_on_attempts_updated):
+		ItemManager.attempts_updated.connect(_on_attempts_updated)
 
-	if snap_tween and snap_tween.is_running():
-		current_rotation_y = rotation_degrees.y
-		_check_haptic_click()
-		return
+	count_label.text = str(ItemManager.current_attempts)
 
-	if is_dragging:
-		return
+	# РЎРѕР·РґР°РµРј СѓРЅРёРєР°Р»СЊРЅС‹Р№ РјР°С‚РµСЂРёР°Р» СЃ С€РµР№РґРµСЂРѕРј Р±Р»РёРєР°
+	_shader_mat = ShaderMaterial.new()
+	_shader_mat.shader = load("res://Shaders/glint.gdshader")
+	_shader_mat.set_shader_parameter("progress", -0.1) # РџСЂСЏС‡РµРј Р±Р»РёРє Р·Р° РїСЂРµРґРµР»С‹
+	heart_icon.material = _shader_mat
 
-	if abs(angular_velocity) > snap_threshold:
-		current_rotation_y += angular_velocity * (delta * 60.0) # РљРѕРјРїРµРЅСЃР°С†РёСЏ РїРѕРґ 60 FPS
-		rotation_degrees.y = current_rotation_y
-		angular_velocity = lerpf(angular_velocity, 0.0, friction * delta)
-		_check_haptic_click()
-	else:
-		angular_velocity = 0.0
-		var target_y: float = round(current_rotation_y / face_angle_step) * face_angle_step
-		if abs(target_y - current_rotation_y) > SNAP_ANGLE_EPS:
-			_begin_snap_to_face(target_y)
-
-func _input(event: InputEvent) -> void:
-	if is_level_finished:
-		return
-	if not can_rotate:
-		return
-
-	if ItemManager.is_dragging_item:
-		if event is InputEventMouseButton or event is InputEventScreenTouch:
-			if not event.pressed:
-				is_dragging = false
-		return
-
-	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
-		if event.pressed:
-			_on_rotate_grab()
-		else:
-			is_dragging = false
-		return
-
-	if event is InputEventScreenTouch:
-		if event.pressed:
-			_on_rotate_grab()
-		else:
-			is_dragging = false
-		return
-
-	if not is_dragging:
-		return
-
-	if event is InputEventMouseMotion:
-		if not Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT):
-			return
-		_apply_direct_rotation(event.relative.x)
-	elif event is InputEventScreenDrag:
-		_apply_direct_rotation(event.relative.x)
-
-func _on_rotate_grab() -> void:
-	if is_level_finished:
-		return
-	is_dragging = true
-	angular_velocity = 0.0
-	_stop_snap()
-	current_rotation_y = rotation_degrees.y
-
-func _apply_direct_rotation(rel_x: float) -> void:
-	if is_level_finished:
-		return
-	var delta_rot: float = rel_x * swipe_sensitivity
-	current_rotation_y += delta_rot
-	rotation_degrees.y = current_rotation_y
-	angular_velocity = rel_x * swipe_sensitivity
-	angular_velocity = clampf(angular_velocity, -max_angular_velocity, max_angular_velocity)
-	# Р©РµР»С‡РєРё С‚РѕР»СЊРєРѕ С‡РµСЂРµР· С…Р°РїС‚РёРєРё, Р±РµР· РІРёР·СѓР°Р»СЊРЅРѕРіРѕ РїСЂРёС‚СЏР¶РµРЅРёСЏ Рє РіСЂР°РЅРё РІРѕ РІСЂРµРјСЏ РґСЂР°РіР°
-	_check_haptic_click()
-
-func _begin_snap_to_face(target_y: float) -> void:
-	_stop_snap()
-	snap_tween = create_tween()
-	snap_tween.set_parallel(true)
-	snap_tween.tween_property(self, "current_rotation_y", target_y, snap_duration)\
-		.set_trans(Tween.TRANS_QUART).set_ease(Tween.EASE_OUT)
-	snap_tween.tween_property(self, "rotation_degrees:y", target_y, snap_duration)\
-		.set_trans(Tween.TRANS_QUART).set_ease(Tween.EASE_OUT)
-	snap_tween.finished.connect(func():
-		current_rotation_y = rotation_degrees.y
-		_check_haptic_click()
-	)
-
-func _check_haptic_click() -> void:
-	if not haptics_enabled:
-		return
-	var step: float = maxf(face_angle_step, 0.001)
-	var current_index: int = int(round(rotation_degrees.y / step))
-	if current_index != last_haptic_index:
-		Input.vibrate_handheld(haptic_click_ms)
-		last_haptic_index = current_index
-
-func _stop_snap() -> void:
-	if snap_tween != null:
-		snap_tween.kill()
-	snap_tween = null
-
-func _get_camera_angle_xz(default_angle: float = PI / 2.0) -> float:
-	var cam = get_viewport().get_camera_3d()
-	var cam_angle = default_angle
-	if cam:
-		var to_cam = cam.global_position - global_position
-		to_cam.y = 0.0
-		if to_cam.length_squared() > 0.0001:
-			cam_angle = atan2(to_cam.z, to_cam.x)
-	return cam_angle
-
-func focus_item_face_to_camera(item_node: Node3D, duration: float = 0.35, force: bool = false) -> void:
-	if is_level_finished:
-		return
-	if item_node == null or not is_instance_valid(item_node):
-		return
-	var cell = item_node.get_parent()
-	if cell == null or not is_instance_valid(cell):
-		return
-	
-	var cell_pos = cell.global_position - global_position
-	cell_pos.y = 0.0
-	if cell_pos.length_squared() <= 0.0001:
-		return
-	
-	var col_world_angle = atan2(cell_pos.z, cell_pos.x)
-	var cam_angle = _get_camera_angle_xz()
-	var diff = wrapf(col_world_angle - cam_angle, -PI, PI)
-	
-	if not force and abs(diff) < deg_to_rad(8.0):
-		return
-	# РџСЂРё force=true РІСЃС‘ СЂР°РІРЅРѕ РЅРµ С‚СЂРѕРіР°РµРј С€РєР°С„ РµСЃР»Рё РѕРЅ СѓР¶Рµ С‚РѕС‡РЅРѕ СЃРјРѕС‚СЂРёС‚ РІ РєР°РјРµСЂСѓ
-	if abs(diff) < deg_to_rad(0.5):
-		return
-
-	_stop_snap()
-	if focus_tween and focus_tween.is_running():
-		focus_tween.kill()
-	angular_velocity = 0.0
-	var target_deg: float = rad_to_deg(rotation.y + diff)
-	focus_tween = create_tween().set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
-	focus_tween.tween_property(self, "rotation_degrees:y", target_deg, duration)
-	focus_tween.finished.connect(func(): current_rotation_y = rotation_degrees.y)
-
-func build_cabinet_tornado() -> void:
-	is_level_finished = false
-	for child in get_children():
-		child.hide() # РЎРїСЂСЏС‚Р°С‚СЊ РїРµСЂРµРґ СѓРґР°Р»РµРЅРёРµРј
-		child.queue_free()
-		
+func start_appear_animation() -> void:
 	show()
-	can_rotate = false
-	active_red_cells.clear()
-	unlocked_coin_cols.clear()
-	_is_first_bonus_reveal = true
-	_reward_session_id += 1
-	_no_bonus_close_pending = false
+	modulate.a = 0.0
+	var tw = create_tween().bind_node(self).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	tw.tween_property(self, "modulate:a", 1.0, 0.4)
 
-	var spawn_list = []
-	for order_item in ItemManager.current_order:
-		spawn_list.append(order_item["id"])
-	if spawn_list == null or spawn_list.is_empty():
-		printerr("build_cabinet_tornado: spawn_list РїСѓСЃС‚. РџСЂРѕРІРµСЂСЊ РіРµРЅРµСЂР°С†РёСЋ Р·Р°РєР°Р·Р° Рё Р·Р°РіСЂСѓР·РєСѓ items_db.")
+func _on_attempts_updated(new_val: int, is_correct: bool) -> void:
+	# Р—Р°С‰РёС‚Р° РѕС‚ Р°РЅРёРјР°С†РёРё РїСЂРё СЂРµСЃС‚Р°СЂС‚Рµ СѓСЂРѕРІРЅСЏ
+	if new_val == ItemManager.max_attempts:
+		count_label.text = str(new_val)
 		return
 
-	var all_ids = ItemManager.items_db.keys()
-	if all_ids == null or all_ids.is_empty():
-		printerr("build_cabinet_tornado: items_db РїСѓСЃС‚ (all_ids РїСѓСЃС‚). РџСЂРѕРІРµСЂСЊ РїСѓС‚Рё/СЂРµРіРёСЃС‚СЂ РІ Items/Data Рё СЂРµСЃСѓСЂСЃС‹ .tres.")
+	# Р•СЃР»Рё 0 - РїСЂРѕСЃС‚Рѕ РјРµРЅСЏРµРј С†РёС„СЂСѓ Рё РІС‹С…РѕРґРёРј (Р±РµР· Р±Р»РёРєР° Рё Р°РЅРёРјР°С†РёРё)
+	if new_val == 0:
+		count_label.text = str(new_val)
 		return
-	while spawn_list.size() < (ROWS * COLUMNS):
-		spawn_list.append(all_ids[randi() % all_ids.size()])
-	spawn_list.shuffle()
-	
-	var all_indices = []
-	for i in range(ROWS * COLUMNS): all_indices.append(i)
-	all_indices.shuffle()
-	var bonus_indices = all_indices.slice(0, 3)
-	
-	var tangential_max_width = 2.0 * BLENDER_RADIUS * tan(STEP_ANGLE / 2.0)
-	var target_scale_x = (tangential_max_width / manual_mesh_width) * width_scale
-	var final_radial_position = BLENDER_RADIUS + geometric_radial_offset
-	var total_assembly_time = (ROWS * delay_between_rows) + (COLUMNS * delay_between_cells_in_row) + cell_fly_duration
-	
-	current_rotation_y = 0.0
-	rotation_degrees.y = 0.0
-	last_haptic_index = 0
 
-	var cabinet_tween = create_tween()
-	cabinet_tween.tween_property(self, "rotation_degrees:y", total_rotation_degrees, total_assembly_time)\
-		.set_trans(trans_type).set_ease(ease_type)
-	cabinet_tween.finished.connect(func():
-		can_rotate = true
-		current_rotation_y = rotation_degrees.y
-	)
-	
-	for row in range(ROWS):
-		var current_row_delay = row * delay_between_rows
-		var row_y = float(row) * CELL_HEIGHT * VERTICAL_SPACING
-		
-		for i in range(COLUMNS):
-			var current_index = row * COLUMNS + i
-			var is_red = current_index in bonus_indices
-			
-			var angle: float = float(i) * STEP_ANGLE
-			var target_pos := Vector3(cos(angle) * final_radial_position, row_y, sin(angle) * final_radial_position)
+	if pulse_tween and pulse_tween.is_valid():
+		pulse_tween.kill()
 
-			var cell
-			if is_red:
-				cell = red_cell_scene.instantiate()
-				active_red_cells.append({"cell": cell, "col": i})
-				# Р’ РєСЂР°СЃРЅСѓСЋ СЏС‡РµР№РєСѓ РїСЂРµРґРјРµС‚ РќР• РґРѕР±Р°РІР»СЏРµРј! РњРѕРЅРµС‚РєР° С‚Р°Рј СѓР¶Рµ РµСЃС‚СЊ РїРѕ СѓРјРѕР»С‡Р°РЅРёСЋ.
-			else:
-				cell = green_cell_scene.instantiate()
-				# Р’ Р·РµР»С‘РЅСѓСЋ СЏС‡РµР№РєСѓ РґРѕР±Р°РІР»СЏРµРј РїСЂРµРґРјРµС‚
-				var item_node = item_3d_scene.instantiate()
-				cell.add_child(item_node)
-				var sid: int = spawn_list[current_index]
-				item_node.setup(sid)
-				item_node.set_meta("puzzle_shape", ItemManager.get_shape_for_instance(sid))
-				item_node.position = Vector3(0, 0, 0.1)
-				
-			add_child(cell)
-			
-			cell.scale = Vector3(0.001, 0.001, 0.001)
-			
-			var random_spawn_dist = randf_range(spawn_distance_min, spawn_distance_max)
-			var spawn_radius = final_radial_position + random_spawn_dist
-			cell.position = Vector3(cos(angle) * spawn_radius, row_y, sin(angle) * spawn_radius)
-			cell.rotation = Vector3(0, -angle, 0)
-			
-			var individual_delay = current_row_delay + (i * delay_between_cells_in_row)
-			var t = create_tween().set_parallel(true)
-			t.tween_property(cell, "position", target_pos, cell_fly_duration)\
-				.set_trans(trans_type).set_ease(ease_type).set_delay(individual_delay)
-			t.tween_property(cell, "scale", Vector3(target_scale_x, 1.0, 1.0), cell_fly_duration)\
-				.set_trans(trans_type).set_ease(ease_type).set_delay(individual_delay)
+	pulse_tween = create_tween().bind_node(self)
 
-	_place_caps_sync(total_assembly_time)
+	# Р•СЃР»Рё РїСЂРµРґРјРµС‚ РІРµСЂРЅС‹Р№ - Р¶РґРµРј 0.35СЃ, РїРѕРєР° РїРµСЂРµРІРµСЂРЅРµС‚СЃСЏ РєР°СЂС‚РѕС‡РєР° РІ SideWidget
+	if is_correct:
+		pulse_tween.tween_interval(0.35)
 
-	_bonus_red_cell_count = active_red_cells.size()
-
-func reveal_next_bonus_cell(callback: Callable):
-	if active_red_cells.size() == 0:
-		callback.call()
-		# РќРµС‚ РєСЂР°СЃРЅС‹С… СЏС‡РµРµРє СЃ РјРѕРЅРµС‚Р°РјРё вЂ” on_coin_collected РЅРёРєРѕРіРґР° РЅРµ РѕРїСѓСЃС‚РёС‚ СЃРїРёСЃРѕРє, СЃРёРіРЅР°Р» РЅРµ РїСЂРёРґС‘С‚.
-		if _bonus_red_cell_count == 0:
-			_schedule_all_bonus_coins_collected_no_coins()
-		return
-		
-	var data = active_red_cells.pop_front()
-	var cell = data["cell"]
-	var col: int = data["col"]
-	
-	_stop_snap()
-	# РЈР±РёРІР°РµРј focus tween вЂ” РёРЅР°С‡Рµ РѕРЅ Р±СѓРґРµС‚ РєРѕРЅС„Р»РёРєС‚РѕРІР°С‚СЊ СЃ РїРѕРІРѕСЂРѕС‚РѕРј РєРёРЅРµРјР°С‚РёРєРё
-	if focus_tween and focus_tween.is_running():
-		focus_tween.kill()
-	can_rotate = false
-	is_dragging = false
-	angular_velocity = 0.0
-	
-	# РЈРіРѕР» РєР°РјРµСЂС‹ РѕС‚РЅРѕСЃРёС‚РµР»СЊРЅРѕ С†РµРЅС‚СЂР° С€РєР°С„Р° РІ XZ-РїР»РѕСЃРєРѕСЃС‚Рё.
-	var cam_angle = _get_camera_angle_xz()
-	
-	# РЇС‡РµР№РєР° col СЃС‚РѕРёС‚ РЅР° С†РёР»РёРЅРґСЂРµ РїРѕРґ Р»РѕРєР°Р»СЊРЅС‹Рј СѓРіР»РѕРј col * STEP_ANGLE.
-	# РџСЂРё rotation.y = R РјРёСЂРѕРІРѕР№ СѓРіРѕР» СЏС‡РµР№РєРё = col_angle - R (РёР· РјР°С‚СЂРёС†С‹ РїРѕРІРѕСЂРѕС‚Р° Godot).
-	# РџСЂРёСЂР°РІРЅРёРІР°РµРј Рє cam_angle: col_angle - R = cam_angle => R = col_angle - cam_angle.
-	var target_rot = float(col) * STEP_ANGLE - cam_angle
-	var diff = angle_difference(rotation.y, target_rot)
-	
-	if abs(diff) < deg_to_rad(5.0):
-		diff += TAU
-	
-	var final_angle_rad: float = rotation.y + diff
-	var final_deg: float = rad_to_deg(final_angle_rad)
-
-	var extra_spin: float = 0.0
-	if _is_first_bonus_reveal:
-		extra_spin = 360.0 if diff >= 0 else -360.0
-		_is_first_bonus_reveal = false
-
-	var juicy_final_deg: float = final_deg + extra_spin
-
-	var reveal_duration: float = 1.0 / bonus_reveal_speed_multiplier
-	var post_open_delay: float = 0.6 / (bonus_reveal_speed_multiplier * bonus_post_open_delay_multiplier)
-	if bonus_fixed_post_open_delay >= 0.0:
-		post_open_delay = bonus_fixed_post_open_delay
-
-	var tw := create_tween().set_trans(Tween.TRANS_QUART).set_ease(Tween.EASE_IN_OUT)
-	tw.tween_property(self, "rotation_degrees:y", juicy_final_deg, reveal_duration)
-	tw.tween_callback(func():
-		current_rotation_y = rotation_degrees.y
-		rotation_degrees.y = fmod(rotation_degrees.y, 360.0)
-		current_rotation_y = rotation_degrees.y
-
-		if is_instance_valid(cell):
-			cell.set_meta("cabinet_col", col)
-			_register_coin_col(col)
-			if cell.has_method("open_doors"):
-				cell.open_doors()
-
-		get_tree().create_timer(post_open_delay).timeout.connect(func():
-			can_rotate = true
-			angular_velocity = 0.0
-			current_rotation_y = rotation_degrees.y
-			callback.call()
-		)
+	# РџРѕРґРіРѕС‚РѕРІРєР° РїРµСЂРµРґ РїСѓР»СЊСЃРѕРј
+	pulse_tween.tween_callback(func():
+		_shader_mat.set_shader_parameter("progress", 0.0)
 	)
 
-func _place_caps_sync(duration: float) -> void:
-	if cap_scene == null: return
-	var s_xz = BLENDER_RADIUS / CAP_FIT_RADIUS
-	var cap_scale = Vector3(s_xz, 1.0, s_xz)
-	var t = create_tween().set_parallel(true)
+	# Р¤РђР—Рђ 1: "Р’Р·РґРѕС…" (РЅР°РїРѕР»РЅРµРЅРёРµ СЃРµСЂРґС†Р°) + РџСЂРѕС…РѕРґ Р±Р»РёРєР°
+	var phase1 = pulse_tween.parallel()
+	phase1.tween_property(heart_icon, "scale", Vector2(1.35, 1.35), 0.25).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+	phase1.tween_method(
+		func(v: float): _shader_mat.set_shader_parameter("progress", v),
+		0.0, 1.0, 0.25
+	).set_trans(Tween.TRANS_LINEAR)
 
-	var bottom = cap_scene.instantiate() as Node3D
-	add_child(bottom)
-	bottom.scale = Vector3(0.001, 0.001, 0.001)
-	bottom.position = Vector3(0.0, CAP_BOTTOM_Y - 15.0, 0.0)
-	t.tween_property(bottom, "position", Vector3(0.0, CAP_BOTTOM_Y, 0.0), duration).set_trans(trans_type).set_ease(ease_type)
-	t.tween_property(bottom, "scale", cap_scale, duration).set_trans(trans_type).set_ease(ease_type)
-
-	var top = cap_scene.instantiate() as Node3D
-	add_child(top)
-	top.scale = Vector3(0.001, 0.001, 0.001)
-	var top_y = (float(ROWS - 1) * CELL_HEIGHT * VERTICAL_SPACING) + CELL_HEIGHT + CAP_TOP_Y_MARGIN
-	top.position = Vector3(0.0, top_y + 15.0, 0.0)
-	t.tween_property(top, "position", Vector3(0.0, top_y, 0.0), duration).set_trans(trans_type).set_ease(ease_type)
-	t.tween_property(top, "scale", cap_scale, duration).set_trans(trans_type).set_ease(ease_type)
-
-# =============================================================
-# РџРћРЎР›Р•Р”РћР’РђРўР•Р›Р¬РќРћРЎРўР¬ РЎР‘РћР Рђ РњРћРќР•Рў (РІСЃРµРіРґР° СЃР»РµРІР° РЅР°РїСЂР°РІРѕ)
-# =============================================================
-
-func _schedule_all_bonus_coins_collected_no_coins() -> void:
-	if _no_bonus_close_pending:
-		return
-	_no_bonus_close_pending = true
-	var session := _reward_session_id
-	_no_bonus_complete_timer = get_tree().create_timer(0.2)
-	_no_bonus_complete_timer.timeout.connect(func():
-		_no_bonus_complete_timer = null
-		_no_bonus_close_pending = false
-		if session != _reward_session_id:
-			return
-		if is_instance_valid(self):
-			is_level_finished = true
-			can_rotate = false
-			angular_velocity = 0.0
-			all_rewards_collected_visually.emit()
-			all_bonus_coins_collected.emit()
+	# Р¤РђР—Рђ 2: РџРёРє РїСѓР»СЊСЃР° (РјРёРєСЂРѕ-Р·Р°РІРёСЃР°РЅРёРµ Рё РёР·РјРµРЅРµРЅРёРµ С†РёС„СЂС‹)
+	pulse_tween.chain().tween_callback(func():
+		count_label.text = str(new_val)
 	)
+	pulse_tween.tween_property(heart_icon, "scale", Vector2(1.45, 1.45), 0.05).set_trans(Tween.TRANS_LINEAR)
 
-# Р РµРіРёСЃС‚СЂРёСЂСѓРµРј РѕС‚РєСЂС‹С‚СѓСЋ СЏС‡РµР№РєСѓ СЃ РјРѕРЅРµС‚РѕР№ РІ РїРѕСЂСЏРґРєРµ РєРѕР»РѕРЅРѕРє
-func _register_coin_col(col: int) -> void:
-	if not col in unlocked_coin_cols:
-		unlocked_coin_cols.append(col)
-		unlocked_coin_cols.sort()  # РЎРѕСЂС‚РёСЂСѓРµРј РїРѕ РІРѕР·СЂР°СЃС‚Р°РЅРёСЋ в†’ СЃР»РµРІР° РЅР°РїСЂР°РІРѕ
+	# Р¤РђР—Рђ 3: РЈРїСЂСѓРіРёР№ РІРѕР·РІСЂР°С‚ (Elastic snap)
+	pulse_tween.chain().tween_property(heart_icon, "scale", Vector2.ONE, 0.5).set_trans(Tween.TRANS_ELASTIC).set_ease(Tween.EASE_OUT)
 
-# Р’С‹Р·С‹РІР°РµС‚СЃСЏ РёР· coin_3d.gd РІ РЅР°С‡Р°Р»Рµ СЃР±РѕСЂР° РјРѕРЅРµС‚С‹ (РґРѕ РїРѕР»С‘С‚Р°); Р·РґРµСЃСЊ Р¶Рµ СѓС‡РёС‚С‹РІР°РµРј +1 Рє Р»РµС‚СЏС‰РёРј.
-# РЎР»РµРґСѓСЋС‰РµР№ РІСЃРµРіРґР° СЃС‚Р°РЅРѕРІРёС‚СЃСЏ СЏС‡РµР№РєР° РџР РђР’Р•Р• СЃРѕР±СЂР°РЅРЅРѕР№ (РїРѕ РІРѕР·СЂР°СЃС‚Р°РЅРёСЋ РєРѕР»РѕРЅРєРё),
-# Р° РµСЃР»Рё РїСЂР°РІРµРµ РЅРёС‡РµРіРѕ РЅРµС‚ вЂ” РїРµСЂРµС…РѕРґРёРј Рє РєСЂР°Р№РЅРµР№ Р»РµРІРѕР№ РёР· РѕСЃС‚Р°РІС€РёС…СЃСЏ.
-func on_coin_collected(col: int) -> void:
-	var idx := unlocked_coin_cols.find(col)
-	if idx < 0:
-		return  # РњРѕРЅРµС‚РєР° СѓР¶Рµ РЅРµ РІ СЃРїРёСЃРєРµ вЂ” РЅРёС‡РµРіРѕ РЅРµ РґРµР»Р°РµРј
-	unlocked_coin_cols.remove_at(idx)
-	_coins_in_flight += 1
-
-	if unlocked_coin_cols.is_empty():
-		can_rotate = true
-		angular_velocity = 0.0
-		return
-
-	# РџРѕСЃР»Рµ СѓРґР°Р»РµРЅРёСЏ idx СѓРєР°Р·С‹РІР°РµС‚ СЂРѕРІРЅРѕ РЅР° СЃР»РµРґСѓСЋС‰СѓСЋ РїСЂР°РІСѓСЋ СЏС‡РµР№РєСѓ.
-	# Р•СЃР»Рё Р±С‹Р»Рё РІ РєРѕРЅС†Рµ СЃРїРёСЃРєР° вЂ” % РѕР±РѕСЂР°С‡РёРІР°РµС‚ Рє РєСЂР°Р№РЅРµР№ Р»РµРІРѕР№.
-	var next_col: int = unlocked_coin_cols[idx % unlocked_coin_cols.size()]
-	_rotate_to_coin_col(next_col)
-
-# РџРѕРІРѕСЂРѕС‚ Рє РіСЂР°РЅРё СЃ РјРѕРЅРµС‚РѕР№ вЂ” РІСЃРµРіРґР° РІ РїРѕР»РѕР¶РёС‚РµР»СЊРЅРѕРј РЅР°РїСЂР°РІР»РµРЅРёРё (СЃР»РµРІР° РЅР°РїСЂР°РІРѕ)
-func _rotate_to_coin_col(next_col: int) -> void:
-	can_rotate = false
-	_stop_snap()
-	if focus_tween and focus_tween.is_running(): focus_tween.kill()
-	if coin_seq_tween and coin_seq_tween.is_running(): coin_seq_tween.kill()
-	angular_velocity = 0.0
-
-	var cam_angle := _get_camera_angle_xz()
-	var target_rot := float(next_col) * STEP_ANGLE - cam_angle
-
-	# РџРѕР»РѕР¶РёС‚РµР»СЊРЅС‹Р№ РїРѕРІРѕСЂРѕС‚ (СЃР»РµРІР° РЅР°РїСЂР°РІРѕ): РёСЃРїРѕР»СЊР·СѓРµРј wrapf РІ [0, TAU).
-	var diff := wrapf(target_rot - rotation.y, 0.0, TAU)
-	# Р•СЃР»Рё СѓР¶Рµ СЃРјРѕС‚СЂРёРј РЅР° СЌС‚Сѓ РјРѕРЅРµС‚РєСѓ вЂ” РЅРµ РєСЂСѓС‚РёРј, РёРіСЂРѕРє СЃСЂР°Р·Сѓ РІРёРґРёС‚ РµС‘.
-	if diff < deg_to_rad(3.0):
-		return
-
-	var target_coin_deg: float = rad_to_deg(rotation.y + diff)
-	coin_seq_tween = create_tween().set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
-	coin_seq_tween.tween_property(self, "rotation_degrees:y", target_coin_deg, 0.7)
-	coin_seq_tween.finished.connect(func(): current_rotation_y = rotation_degrees.y)
-
-
-func _on_bonus_coin_flight_finished() -> void:
-	_coins_in_flight = maxi(_coins_in_flight - 1, 0)
-
-	if _coins_in_flight == 0 and unlocked_coin_cols.is_empty() and active_red_cells.is_empty():
-		if is_instance_valid(self):
-			is_level_finished = true
-			can_rotate = false
-			angular_velocity = 0.0
-			all_rewards_collected_visually.emit()
-			all_bonus_coins_collected.emit()
+	# РџСЂСЏС‡РµРј Р±Р»РёРє РІ РєРѕРЅС†Рµ, С‡С‚РѕР±С‹ РЅРµ РѕСЃС‚Р°РІР»СЏС‚СЊ Р°СЂС‚РµС„Р°РєС‚РѕРІ
+	pulse_tween.parallel().tween_callback(func():
+		_shader_mat.set_shader_parameter("progress", -0.1)
+	).set_delay(0.1)
 
 
 
 ============================================================
-SCRIPT: coin_3d.gd
-PATH: res://Scenes/coin_3d.gd
-THESIS: Логика бонусной монеты: unlock, полет, уведомление шкафа и удаление после завершения.
+SCRIPT: backpack_closing_sequence.gd
+PATH: res://Scenes/backpack_closing_sequence.gd
+THESIS: UI-анимация закрытия рюкзака по кадрам (drag + snap).
 -------------------- FULL SOURCE ---------------------------
-extends Node3D
+extends Control
 
-var is_collected = false
-var is_unlocked = false
+signal packing_completed
 
-func unlock():
-	is_unlocked = true
+@onready var frame_display = $FrameDisplay
+@onready var drag_handle = $DragHandle
 
-	# РќРµР±РѕР»СЊС€Р°СЏ РїР°СѓР·Р° (0.4 СЃРµРє), С‡С‚РѕР±С‹ РёРіСЂРѕРє СѓСЃРїРµР» РЅР°СЃР»Р°РґРёС‚СЊСЃСЏ РІР·СЂС‹РІРѕРј РєРѕРЅС„РµС‚С‚Рё
-	# Рё РѕСЃРѕР·РЅР°С‚СЊ РЅР°РіСЂР°РґСѓ, РїСЂРµР¶РґРµ С‡РµРј РѕРЅР° СѓР»РµС‚РёС‚
-	get_tree().create_timer(0.4).timeout.connect(func():
-		if not is_collected:
-			is_collected = true
-			collect_coin()
-	)
+# РЈРљРђР–Р Р—Р”Р•РЎР¬ РџРЈРўР Рљ РўР’РћРРњ 8 РљРђР”Р РђРњ!
+var frames = [
+	preload("res://Assets/Backpack_animation/B1.png"), # Р—Р°РјРµРЅРё РЅР° СЃРІРѕРё РїСѓС‚Рё
+	preload("res://Assets/Backpack_animation/B2.png"),
+	preload("res://Assets/Backpack_animation/B3.png"),
+	preload("res://Assets/Backpack_animation/B4.png"),
+	preload("res://Assets/Backpack_animation/B5.png"),
+	preload("res://Assets/Backpack_animation/B6.png"),
+	preload("res://Assets/Backpack_animation/B7.png"),
+	preload("res://Assets/Backpack_animation/B8.png")
+]
 
-func collect_coin():
-	if not is_inside_tree(): return
+var total_frames = 8
+var current_frame_index = 0
 
-	var main_scene = get_tree().current_scene
-
-	# РС‰РµРј С€РєР°С„, РїРѕРґРЅРёРјР°СЏСЃСЊ РїРѕ СЂРѕРґРёС‚РµР»СЏРј
-	var cabinet_node = get_parent()
-	while cabinet_node != null and not cabinet_node.has_method("reveal_next_bonus_cell"):
-		cabinet_node = cabinet_node.get_parent()
-
-	if cabinet_node == null:
-		printerr("РћРЁРР‘РљРђ: РЁРєР°С„ РЅРµ РЅР°Р№РґРµРЅ! РђРЅРёРјР°С†РёСЏ РѕС‚РјРµРЅРµРЅР°.")
-		is_collected = false
-		return
-
-	# Р—Р°РїРѕРјРёРЅР°РµРј РєРѕР»РѕРЅРєСѓ Р”Рћ С‚РѕРіРѕ РєР°Рє РїРµСЂРµРїСЂРёРІСЏР¶РµРјСЃСЏ Рє main_scene.
-	# РњРµС‚Р°РґР°РЅРЅС‹Рµ "cabinet_col" СѓСЃС‚Р°РЅР°РІР»РёРІР°СЋС‚СЃСЏ С€РєР°С„РѕРј РІ reveal_next_bonus_cell.
-	var my_col: int = -1
-	var parent_cell = get_parent()
-	if parent_cell and parent_cell.has_meta("cabinet_col"):
-		my_col = parent_cell.get_meta("cabinet_col")
-
-	# Р’С‹С‡РёСЃР»СЏРµРј РЅР°РїСЂР°РІР»РµРЅРёРµ РѕС‚ С†РµРЅС‚СЂР° С€РєР°С„Р° Рє РјРѕРЅРµС‚РєРµ (С‚РѕР»СЊРєРѕ РїРѕ XZ).
-	var direction_out = global_position - cabinet_node.global_position
-	direction_out.y = 0
-	if direction_out.length_squared() < 0.0001:
-		direction_out = -global_basis.z
-		direction_out.y = 0
-	direction_out = direction_out.normalized()
-
-	var out_distance = 1.2
-	var final_out_pos = global_position + (direction_out * out_distance)
-
-	# РЎРѕРѕР±С‰Р°РµРј С€РєР°С„Сѓ РЎР РђР—РЈ вЂ” РїРѕРІРѕСЂРѕС‚ Рє СЃР»РµРґСѓСЋС‰РµР№ РјРѕРЅРµС‚Рµ РЅР°С‡РёРЅР°РµС‚СЃСЏ РїР°СЂР°Р»Р»РµР»СЊРЅРѕ СЃ Р°РЅРёРјР°С†РёРµР№
-	if my_col >= 0 and is_instance_valid(cabinet_node) and cabinet_node.has_method("on_coin_collected"):
-		cabinet_node.on_coin_collected(my_col)
-
-	var tw = create_tween().set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
-
-	# РћС‚СЂС‹РІР°РµРј РѕС‚ С€РєР°С„Р° (РїРµСЂРµРїСЂРёРІСЏР·РєР° Рє main_scene РґР»СЏ СЃРІРѕР±РѕРґРЅРѕРіРѕ РїРѕР»С‘С‚Р°)
-	tw.tween_callback(func():
-		var old_global_transform = global_transform
-		if get_parent():
-			get_parent().remove_child(self)
-		main_scene.add_child(self)
-		global_transform = old_global_transform
-	)
-
-	# РЁР°Рі 1: Р‘С‹СЃС‚СЂРѕ РІС‹РґРІРёРіР°РµРј РёР· СЏС‡РµР№РєРё
-	tw.tween_property(self, "global_position", final_out_pos, 0.18)
-	tw.tween_interval(0.1)
-
-	# РЁР°Рі 2: Р›РµС‚РёРј РІРІРµСЂС… СЃ РІСЂР°С‰РµРЅРёРµРј
-	var spin_degrees = 360.0
-	var up_distance = 10.0
-	tw.parallel().tween_property(self, "global_position:y", final_out_pos.y + up_distance, 1.2)
-	tw.parallel().tween_property(self, "rotation_degrees:y", rotation_degrees.y + spin_degrees, 1.2).set_ease(Tween.EASE_IN_OUT)
-
-	tw.tween_callback(func():
-		if cabinet_node and is_instance_valid(cabinet_node) and cabinet_node.has_method("_on_bonus_coin_flight_finished"):
-			cabinet_node._on_bonus_coin_flight_finished()
-		queue_free()
-	)
-
-
-
-============================================================
-SCRIPT: Item_3d.gd
-PATH: res://Scenes/Item_3d.gd
-THESIS: 3D-предмет шкафа: инициализация текстуры, обработка клика и hide/show спрайта.
--------------------- FULL SOURCE ---------------------------
-extends Node3D
-
-var item_id: int
-var texture_path: String
-
-func setup(id: int):
-	item_id = id
-	var item_data = ItemManager.items_db.get(id)
-	if item_data:
-		texture_path = item_data["texture"]
-		if has_node("Sprite3D"):
-			$Sprite3D.texture = load(texture_path)
+var is_dragging = false
+var drag_start_y = 0.0
+var frame_start_index = 0
+@export var drag_sensitivity = 400.0 # Р’ РїРёРєСЃРµР»СЏС…: СЃРєРѕР»СЊРєРѕ РЅСѓР¶РЅРѕ РїРѕС‚СЏРЅСѓС‚СЊ РґР»СЏ РїРѕР»РЅРѕРіРѕ Р·Р°РєСЂС‹С‚РёСЏ
 
 func _ready():
-	if has_node("Area3D"):
-		$Area3D.input_event.connect(_on_area_3d_input_event)
+	current_frame_index = 0
+	_update_frame()
+	drag_handle.gui_input.connect(_on_handle_input)
 
-func _on_area_3d_input_event(_camera, event, _position, _normal, _shape_idx):
-	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
+func _update_frame():
+	if frames.size() > 0 and current_frame_index < frames.size():
+		frame_display.texture = frames[current_frame_index]
+
+func _on_handle_input(event):
+	if event is InputEventScreenTouch or (event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT):
 		if event.pressed:
-			# РџРµСЂРµРґР°РµРј СЃСЃС‹Р»РєСѓ РЅР° СЃРµР±СЏ (self)
-			ItemManager.item_pressed.emit(item_id, texture_path, self)
+			is_dragging = true
+			drag_start_y = event.position.y
+			frame_start_index = current_frame_index
+		else:
+			is_dragging = false
+			_check_snap()
 
-# --- РќРћР’Р«Р• Р¤РЈРќРљР¦РР Р”Р›РЇ РџР РЇРўРђРќР¬РЇ РџР Р•Р”РњР•РўРђ ---
-func hide_item():
-	if has_node("Sprite3D"):
-		$Sprite3D.hide()
+	elif event is InputEventScreenDrag or (event is InputEventMouseMotion and is_dragging):
+		if is_dragging:
+			var delta_y = event.position.y - drag_start_y
+			var frame_delta = int((delta_y / drag_sensitivity) * total_frames)
+			var new_index = clamp(frame_start_index + frame_delta, 0, total_frames - 1)
 
-func show_item():
-	if has_node("Sprite3D"):
-		$Sprite3D.show()
+			if new_index != current_frame_index:
+				current_frame_index = new_index
+				_update_frame()
+
+func _check_snap():
+	var target_frame = 0
+	if current_frame_index > total_frames / 2:
+		target_frame = total_frames - 1
+
+	var tween = create_tween()
+	tween.tween_method(_animate_frame_snap, current_frame_index, target_frame, 0.3)
+	tween.finished.connect(_on_snap_finished)
+
+func _animate_frame_snap(frame_val):
+	current_frame_index = int(frame_val)
+	_update_frame()
+
+func _on_snap_finished():
+	if current_frame_index == total_frames - 1:
+		emit_signal("packing_completed")
+
 
 
 ============================================================
 SCRIPT: backpack_widget.gd
 PATH: res://Scenes/backpack_widget.gd
-THESIS: Логика рюкзака: сетка, размещение форм, превью, swap, автоупаковка и финальная анимация закрытия.
+THESIS: Рюкзак: сетка паззла, редактор, превью, свапы, автозаполнение и клиффовая анимация.
 -------------------- FULL SOURCE ---------------------------
 extends Control
 
@@ -3030,381 +2125,531 @@ func _on_packing_final_completed() -> void:
 
 
 ============================================================
-SCRIPT: backpack_closing_sequence.gd
-PATH: res://Scenes/backpack_closing_sequence.gd
-THESIS: UI-последовательность закрытия рюкзака по кадрам с drag-снапом и сигналом завершения.
+SCRIPT: cabinet.gd
+PATH: res://Scenes/cabinet.gd
+THESIS: 3D-шкаф: сборка ячеек, инерция вращения, бонусные красные клетки и очередь монет.
 -------------------- FULL SOURCE ---------------------------
-extends Control
+extends Node3D
 
-signal packing_completed
+const COLUMNS: int = 8
+const STEP_ANGLE: float = deg_to_rad(45.0)
+const ROWS: int = 5
+const CELL_HEIGHT: float = 1.25
+const VERTICAL_SPACING: float = 1.6
+const BLENDER_RADIUS: float = 1.88
+const CAP_FIT_RADIUS: float = 1.9
+const CAP_BOTTOM_Y: float = -1.3
+const CAP_TOP_Y_MARGIN: float = 0.0
 
-@onready var frame_display = $FrameDisplay
-@onready var drag_handle = $DragHandle
+@export_group("РџР°СЂР°РјРµС‚СЂС‹ Р°РЅРёРјР°С†РёРё")
+@export var cell_fly_duration: float = 1.2
+@export var spawn_distance_min: float = 15.0
+@export var spawn_distance_max: float = 30.0
+@export var total_rotation_degrees: float = 360.0
 
-# РЈРљРђР–Р Р—Р”Р•РЎР¬ РџРЈРўР Рљ РўР’РћРРњ 8 РљРђР”Р РђРњ!
-var frames = [
-	preload("res://Assets/Backpack_animation/B1.png"), # Р—Р°РјРµРЅРё РЅР° СЃРІРѕРё РїСѓС‚Рё
-	preload("res://Assets/Backpack_animation/B2.png"),
-	preload("res://Assets/Backpack_animation/B3.png"),
-	preload("res://Assets/Backpack_animation/B4.png"),
-	preload("res://Assets/Backpack_animation/B5.png"),
-	preload("res://Assets/Backpack_animation/B6.png"),
-	preload("res://Assets/Backpack_animation/B7.png"),
-	preload("res://Assets/Backpack_animation/B8.png")
-]
+@export_group("РџРѕСЌС‚Р°РїРЅР°СЏ СЃР±РѕСЂРєР°")
+@export var delay_between_rows: float = 0.2
+@export var delay_between_cells_in_row: float = 0.05
 
-var total_frames = 8
-var current_frame_index = 0
+@export_group("Р“Р•РћРњР•РўР РРЇ (РЎС‚С‹РєРѕРІРєР°)")
+@export var width_scale: float = 1.01
+@export var geometric_radial_offset: float = 0.0
+@export var manual_mesh_width: float = 2.0
 
-var is_dragging = false
-var drag_start_y = 0.0
-var frame_start_index = 0
-@export var drag_sensitivity = 400.0 # Р’ РїРёРєСЃРµР»СЏС…: СЃРєРѕР»СЊРєРѕ РЅСѓР¶РЅРѕ РїРѕС‚СЏРЅСѓС‚СЊ РґР»СЏ РїРѕР»РЅРѕРіРѕ Р·Р°РєСЂС‹С‚РёСЏ
+@export_group("РРЅС‚РµСЂРїРѕР»СЏС†РёСЏ")
+@export var trans_type: Tween.TransitionType = Tween.TRANS_CUBIC
+@export var ease_type: Tween.EaseType = Tween.EASE_OUT
 
-func _ready():
-	current_frame_index = 0
-	_update_frame()
-	drag_handle.gui_input.connect(_on_handle_input)
+@export_group("Inertia Physics")
+@export var swipe_sensitivity: float = 0.5
+@export var max_angular_velocity: float = 25.0
+@export var friction: float = 3.0
+@export var snap_threshold: float = 2.0
+@export var snap_duration: float = 0.25
+@export var face_angle_step: float = 45.0
 
-func _update_frame():
-	if frames.size() > 0 and current_frame_index < frames.size():
-		frame_display.texture = frames[current_frame_index]
+@export_group("РҐР°РїС‚РёРє (РЎРµР№С„)")
+@export var haptics_enabled: bool = true
+@export var haptic_click_ms: int = 10
 
-func _on_handle_input(event):
-	if event is InputEventScreenTouch or (event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT):
+const SNAP_ANGLE_EPS: float = 0.01
+
+var can_rotate: bool = false
+var is_dragging: bool = false
+## РЎРєРѕСЂРѕСЃС‚СЊ РІ РіСЂР°РґСѓСЃР°С… Р·Р° РєР°РґСЂ (_physics-like РґР»СЏ РёРЅРµСЂС†РёРё)
+var angular_velocity: float = 0.0
+## РўРµРєСѓС‰РёР№ yaw РІ РіСЂР°РґСѓСЃР°С… (СЃРёРЅС…СЂРѕРЅ СЃ rotation_degrees.y)
+var current_rotation_y: float = 0.0
+var snap_tween: Tween
+var last_haptic_index: int = 0
+
+var red_cell_scene = preload("res://Scenes/Cell_Red.tscn")
+var green_cell_scene = preload("res://Scenes/Cell_Green.tscn")
+var cap_scene = preload("res://Scenes/Top_Down.tscn")
+var item_3d_scene = preload("res://Scenes/Item_3d.tscn")
+
+var active_red_cells = []
+var focus_tween: Tween
+var bonus_reveal_speed_multiplier: float = 1.0
+
+# --- РџРѕСЃР»РµРґРѕРІР°С‚РµР»СЊРЅРѕСЃС‚СЊ СЃР±РѕСЂР° РјРѕРЅРµС‚ ---
+var unlocked_coin_cols: Array = []  # РћС‚СЃРѕСЂС‚РёСЂРѕРІР°РЅРЅС‹Р№ СЃРїРёСЃРѕРє РєРѕР»РѕРЅРѕРє СЃ РѕС‚РєСЂС‹С‚С‹РјРё РјРѕРЅРµС‚Р°РјРё
+var coin_seq_tween: Tween
+var bonus_post_open_delay_multiplier: float = 1.0
+var bonus_fixed_post_open_delay: float = -1.0
+
+var _is_first_bonus_reveal: bool = true
+## РЎРєРѕР»СЊРєРѕ РєСЂР°СЃРЅС‹С… Р±РѕРЅСѓСЃРЅС‹С… СЏС‡РµРµРє Р±С‹Р»Рѕ РїРѕСЃР»Рµ СЃР±РѕСЂРєРё С€РєР°С„Р° (РґРѕ pop_front РІ reveal)
+var _bonus_red_cell_count: int = 0
+var _no_bonus_complete_timer: SceneTreeTimer
+var _reward_session_id: int = 0
+var _no_bonus_close_pending: bool = false
+
+## Р’СЃРµ Р±РѕРЅСѓСЃРЅС‹Рµ РјРѕРЅРµС‚С‹ СЃРѕР±СЂР°РЅС‹ (РїРѕСЃР»РµРґРЅСЏСЏ СѓР±СЂР°РЅР° РёР· РѕС‡РµСЂРµРґРё)
+signal all_bonus_coins_collected
+## РџРѕСЃР»РµРґРЅСЏСЏ РјРѕРЅРµС‚Р° РІРёР·СѓР°Р»СЊРЅРѕ РґРѕР»РµС‚РµР»Р° РґРѕ РєРѕРЅС†Р° Р°РЅРёРјР°С†РёРё РїРѕР»С‘С‚Р°
+signal all_rewards_collected_visually
+
+var _coins_in_flight: int = 0
+var is_level_finished: bool = false
+
+func set_bonus_reveal_speed_multiplier(mult: float) -> void:
+	bonus_reveal_speed_multiplier = max(mult, 0.01)
+
+func set_bonus_post_open_delay_multiplier(mult: float) -> void:
+	bonus_post_open_delay_multiplier = max(mult, 0.01)
+
+func set_bonus_fixed_post_open_delay(seconds: float) -> void:
+	bonus_fixed_post_open_delay = seconds
+
+func _ready() -> void:
+	hide()
+
+func _process(delta: float) -> void:
+	if is_level_finished:
+		return
+	if not can_rotate:
+		return
+
+	if snap_tween and snap_tween.is_running():
+		current_rotation_y = rotation_degrees.y
+		_check_haptic_click()
+		return
+
+	if is_dragging:
+		return
+
+	if abs(angular_velocity) > snap_threshold:
+		current_rotation_y += angular_velocity * (delta * 60.0) # РљРѕРјРїРµРЅСЃР°С†РёСЏ РїРѕРґ 60 FPS
+		rotation_degrees.y = current_rotation_y
+		angular_velocity = lerpf(angular_velocity, 0.0, friction * delta)
+		_check_haptic_click()
+	else:
+		angular_velocity = 0.0
+		var target_y: float = round(current_rotation_y / face_angle_step) * face_angle_step
+		if abs(target_y - current_rotation_y) > SNAP_ANGLE_EPS:
+			_begin_snap_to_face(target_y)
+
+func _input(event: InputEvent) -> void:
+	if is_level_finished:
+		return
+	if not can_rotate:
+		return
+
+	if ItemManager.is_dragging_item:
+		if event is InputEventMouseButton or event is InputEventScreenTouch:
+			if not event.pressed:
+				is_dragging = false
+		return
+
+	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
 		if event.pressed:
-			is_dragging = true
-			drag_start_y = event.position.y
-			frame_start_index = current_frame_index
+			_on_rotate_grab()
 		else:
 			is_dragging = false
-			_check_snap()
+		return
 
-	elif event is InputEventScreenDrag or (event is InputEventMouseMotion and is_dragging):
-		if is_dragging:
-			var delta_y = event.position.y - drag_start_y
-			var frame_delta = int((delta_y / drag_sensitivity) * total_frames)
-			var new_index = clamp(frame_start_index + frame_delta, 0, total_frames - 1)
+	if event is InputEventScreenTouch:
+		if event.pressed:
+			_on_rotate_grab()
+		else:
+			is_dragging = false
+		return
 
-			if new_index != current_frame_index:
-				current_frame_index = new_index
-				_update_frame()
+	if not is_dragging:
+		return
 
-func _check_snap():
-	var target_frame = 0
-	if current_frame_index > total_frames / 2:
-		target_frame = total_frames - 1
+	if event is InputEventMouseMotion:
+		if not Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT):
+			return
+		_apply_direct_rotation(event.relative.x)
+	elif event is InputEventScreenDrag:
+		_apply_direct_rotation(event.relative.x)
 
-	var tween = create_tween()
-	tween.tween_method(_animate_frame_snap, current_frame_index, target_frame, 0.3)
-	tween.finished.connect(_on_snap_finished)
+func _on_rotate_grab() -> void:
+	if is_level_finished:
+		return
+	is_dragging = true
+	angular_velocity = 0.0
+	_stop_snap()
+	current_rotation_y = rotation_degrees.y
 
-func _animate_frame_snap(frame_val):
-	current_frame_index = int(frame_val)
-	_update_frame()
+func _apply_direct_rotation(rel_x: float) -> void:
+	if is_level_finished:
+		return
+	var delta_rot: float = rel_x * swipe_sensitivity
+	current_rotation_y += delta_rot
+	rotation_degrees.y = current_rotation_y
+	angular_velocity = rel_x * swipe_sensitivity
+	angular_velocity = clampf(angular_velocity, -max_angular_velocity, max_angular_velocity)
+	# Р©РµР»С‡РєРё С‚РѕР»СЊРєРѕ С‡РµСЂРµР· С…Р°РїС‚РёРєРё, Р±РµР· РІРёР·СѓР°Р»СЊРЅРѕРіРѕ РїСЂРёС‚СЏР¶РµРЅРёСЏ Рє РіСЂР°РЅРё РІРѕ РІСЂРµРјСЏ РґСЂР°РіР°
+	_check_haptic_click()
 
-func _on_snap_finished():
-	if current_frame_index == total_frames - 1:
-		emit_signal("packing_completed")
+func _begin_snap_to_face(target_y: float) -> void:
+	_stop_snap()
+	snap_tween = create_tween()
+	snap_tween.set_parallel(true)
+	snap_tween.tween_property(self, "current_rotation_y", target_y, snap_duration)\
+		.set_trans(Tween.TRANS_QUART).set_ease(Tween.EASE_OUT)
+	snap_tween.tween_property(self, "rotation_degrees:y", target_y, snap_duration)\
+		.set_trans(Tween.TRANS_QUART).set_ease(Tween.EASE_OUT)
+	snap_tween.finished.connect(func():
+		current_rotation_y = rotation_degrees.y
+		_check_haptic_click()
+	)
 
+func _check_haptic_click() -> void:
+	if not haptics_enabled:
+		return
+	var step: float = maxf(face_angle_step, 0.001)
+	var current_index: int = int(round(rotation_degrees.y / step))
+	if current_index != last_haptic_index:
+		Input.vibrate_handheld(haptic_click_ms)
+		last_haptic_index = current_index
 
+func _stop_snap() -> void:
+	if snap_tween != null:
+		snap_tween.kill()
+	snap_tween = null
 
-============================================================
-SCRIPT: order_pop_up.gd
-PATH: res://Scenes/order_pop_up.gd
-THESIS: Попап заказа: очищает и заново заполняет иконки текущего заказа.
--------------------- FULL SOURCE ---------------------------
-extends Control
+func _get_camera_angle_xz(default_angle: float = PI / 2.0) -> float:
+	var cam = get_viewport().get_camera_3d()
+	var cam_angle = default_angle
+	if cam:
+		var to_cam = cam.global_position - global_position
+		to_cam.y = 0.0
+		if to_cam.length_squared() > 0.0001:
+			cam_angle = atan2(to_cam.z, to_cam.x)
+	return cam_angle
 
-# РЎСЃС‹Р»РєР° РЅР° СЃС†РµРЅСѓ РєР°СЂС‚РѕС‡РєРё (РґРѕР»Р¶РЅР° Р±С‹С‚СЊ РЅР°Р·РЅР°С‡РµРЅР° РІ РРЅСЃРїРµРєС‚РѕСЂРµ Godot!)
-@export var item_card_scene: PackedScene
+func focus_item_face_to_camera(item_node: Node3D, duration: float = 0.35, force: bool = false) -> void:
+	if is_level_finished:
+		return
+	if item_node == null or not is_instance_valid(item_node):
+		return
+	var cell = item_node.get_parent()
+	if cell == null or not is_instance_valid(cell):
+		return
+	
+	var cell_pos = cell.global_position - global_position
+	cell_pos.y = 0.0
+	if cell_pos.length_squared() <= 0.0001:
+		return
+	
+	var col_world_angle = atan2(cell_pos.z, cell_pos.x)
+	var cam_angle = _get_camera_angle_xz()
+	var diff = wrapf(col_world_angle - cam_angle, -PI, PI)
+	
+	if not force and abs(diff) < deg_to_rad(8.0):
+		return
+	# РџСЂРё force=true РІСЃС‘ СЂР°РІРЅРѕ РЅРµ С‚СЂРѕРіР°РµРј С€РєР°С„ РµСЃР»Рё РѕРЅ СѓР¶Рµ С‚РѕС‡РЅРѕ СЃРјРѕС‚СЂРёС‚ РІ РєР°РјРµСЂСѓ
+	if abs(diff) < deg_to_rad(0.5):
+		return
 
-# РЎСЃС‹Р»РєР° РЅР° СѓР·РµР», РєСѓРґР° Р±СѓРґСѓС‚ СЃРєР»Р°РґС‹РІР°С‚СЊСЃСЏ РёРєРѕРЅРєРё
-@onready var items_grid = $LetterContainer/LetterPaper/Items
+	_stop_snap()
+	if focus_tween and focus_tween.is_running():
+		focus_tween.kill()
+	angular_velocity = 0.0
+	var target_deg: float = rad_to_deg(rotation.y + diff)
+	focus_tween = create_tween().set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+	focus_tween.tween_property(self, "rotation_degrees:y", target_deg, duration)
+	focus_tween.finished.connect(func(): current_rotation_y = rotation_degrees.y)
 
-func fill_order_icons():
-	# 1. РџР РђР’РР›Р¬РќРђРЇ РћР§РРЎРўРљРђ: РЎРЅР°С‡Р°Р»Р° РѕС‚СЂС‹РІР°РµРј РѕС‚ РґРµСЂРµРІР°, РїРѕС‚РѕРј СѓРґР°Р»СЏРµРј
-	for child in items_grid.get_children():
-		items_grid.remove_child(child)
+func build_cabinet_tornado() -> void:
+	is_level_finished = false
+	for child in get_children():
+		child.hide() # РЎРїСЂСЏС‚Р°С‚СЊ РїРµСЂРµРґ СѓРґР°Р»РµРЅРёРµРј
 		child.queue_free()
+		
+	show()
+	can_rotate = false
+	active_red_cells.clear()
+	unlocked_coin_cols.clear()
+	_is_first_bonus_reveal = true
+	_reward_session_id += 1
+	_no_bonus_close_pending = false
+
+	var spawn_list = []
+	for order_item in ItemManager.current_order:
+		spawn_list.append(order_item["id"])
+	if spawn_list == null or spawn_list.is_empty():
+		printerr("build_cabinet_tornado: spawn_list РїСѓСЃС‚. РџСЂРѕРІРµСЂСЊ РіРµРЅРµСЂР°С†РёСЋ Р·Р°РєР°Р·Р° Рё Р·Р°РіСЂСѓР·РєСѓ items_db.")
+		return
+
+	var all_ids = ItemManager.items_db.keys()
+	if all_ids == null or all_ids.is_empty():
+		printerr("build_cabinet_tornado: items_db РїСѓСЃС‚ (all_ids РїСѓСЃС‚). РџСЂРѕРІРµСЂСЊ РїСѓС‚Рё/СЂРµРіРёСЃС‚СЂ РІ Items/Data Рё СЂРµСЃСѓСЂСЃС‹ .tres.")
+		return
+	while spawn_list.size() < (ROWS * COLUMNS):
+		spawn_list.append(all_ids[randi() % all_ids.size()])
+	spawn_list.shuffle()
 	
-	# 2. РЎРѕР·РґР°РµРј РЅРѕРІС‹Рµ РєР°СЂС‚РѕС‡РєРё РЅР° РѕСЃРЅРѕРІРµ С‚РµРєСѓС‰РµРіРѕ Р·Р°РєР°Р·Р°
-	for order_data in ItemManager.current_order:
-		if item_card_scene:
-			var card = item_card_scene.instantiate()
-			items_grid.add_child(card)
+	var all_indices = []
+	for i in range(ROWS * COLUMNS): all_indices.append(i)
+	all_indices.shuffle()
+	var bonus_indices = all_indices.slice(0, 3)
+	
+	var tangential_max_width = 2.0 * BLENDER_RADIUS * tan(STEP_ANGLE / 2.0)
+	var target_scale_x = (tangential_max_width / manual_mesh_width) * width_scale
+	var final_radial_position = BLENDER_RADIUS + geometric_radial_offset
+	var total_assembly_time = (ROWS * delay_between_rows) + (COLUMNS * delay_between_cells_in_row) + cell_fly_duration
+	
+	current_rotation_y = 0.0
+	rotation_degrees.y = 0.0
+	last_haptic_index = 0
+
+	var cabinet_tween = create_tween()
+	cabinet_tween.tween_property(self, "rotation_degrees:y", total_rotation_degrees, total_assembly_time)\
+		.set_trans(trans_type).set_ease(ease_type)
+	cabinet_tween.finished.connect(func():
+		can_rotate = true
+		current_rotation_y = rotation_degrees.y
+	)
+	
+	for row in range(ROWS):
+		var current_row_delay = row * delay_between_rows
+		var row_y = float(row) * CELL_HEIGHT * VERTICAL_SPACING
+		
+		for i in range(COLUMNS):
+			var current_index = row * COLUMNS + i
+			var is_red = current_index in bonus_indices
 			
-			var tex_path = ItemManager.items_db[order_data["id"]]["texture"]
-			card.set_item(tex_path)
+			var angle: float = float(i) * STEP_ANGLE
+			var target_pos := Vector3(cos(angle) * final_radial_position, row_y, sin(angle) * final_radial_position)
 
+			var cell
+			if is_red:
+				cell = red_cell_scene.instantiate()
+				active_red_cells.append({"cell": cell, "col": i})
+				# Р’ РєСЂР°СЃРЅСѓСЋ СЏС‡РµР№РєСѓ РїСЂРµРґРјРµС‚ РќР• РґРѕР±Р°РІР»СЏРµРј! РњРѕРЅРµС‚РєР° С‚Р°Рј СѓР¶Рµ РµСЃС‚СЊ РїРѕ СѓРјРѕР»С‡Р°РЅРёСЋ.
+			else:
+				cell = green_cell_scene.instantiate()
+				# Р’ Р·РµР»С‘РЅСѓСЋ СЏС‡РµР№РєСѓ РґРѕР±Р°РІР»СЏРµРј РїСЂРµРґРјРµС‚
+				var item_node = item_3d_scene.instantiate()
+				cell.add_child(item_node)
+				var sid: int = spawn_list[current_index]
+				item_node.setup(sid)
+				item_node.set_meta("puzzle_shape", ItemManager.get_shape_for_instance(sid))
+				item_node.position = Vector3(0, 0, 0.1)
+				
+			add_child(cell)
+			
+			cell.scale = Vector3(0.001, 0.001, 0.001)
+			
+			var random_spawn_dist = randf_range(spawn_distance_min, spawn_distance_max)
+			var spawn_radius = final_radial_position + random_spawn_dist
+			cell.position = Vector3(cos(angle) * spawn_radius, row_y, sin(angle) * spawn_radius)
+			cell.rotation = Vector3(0, -angle, 0)
+			
+			var individual_delay = current_row_delay + (i * delay_between_cells_in_row)
+			var t = create_tween().set_parallel(true)
+			t.tween_property(cell, "position", target_pos, cell_fly_duration)\
+				.set_trans(trans_type).set_ease(ease_type).set_delay(individual_delay)
+			t.tween_property(cell, "scale", Vector3(target_scale_x, 1.0, 1.0), cell_fly_duration)\
+				.set_trans(trans_type).set_ease(ease_type).set_delay(individual_delay)
 
-============================================================
-SCRIPT: side_widget.gd
-PATH: res://Scenes/side_widget.gd
-THESIS: Боковой виджет заказа: анимированное появление элементов и реакция на найденные предметы.
--------------------- FULL SOURCE ---------------------------
-extends Control
+	_place_caps_sync(total_assembly_time)
 
-@export var entry_scene: PackedScene = preload("res://Scenes/SideWidgetEntry.tscn")
+	_bonus_red_cell_count = active_red_cells.size()
 
-@onready var items_container = $ItemsContainer
-@onready var small_envelope = $SmallEnvelope
-@onready var combo_widget = $ComboWidget
-
-const ITEM_SIZE = 120.0
-const SPACING = 30.0
-
-func _ready():
-	hide()
-	if !ItemManager.item_found.is_connected(_on_item_found):
-		ItemManager.item_found.connect(_on_item_found)
-
-func start_appear_animation():
-	# РџР РђР’РР›Р¬РќРђРЇ РћР§РРЎРўРљРђ: РѕС‚СЂС‹РІР°РµРј РѕС‚ РёРЅС‚РµСЂС„РµР№СЃР° РїРµСЂРµРґ СѓРґР°Р»РµРЅРёРµРј
-	for c in items_container.get_children():
-		items_container.remove_child(c)
-		c.queue_free()
+func reveal_next_bonus_cell(callback: Callable):
+	if active_red_cells.size() == 0:
+		callback.call()
+		# РќРµС‚ РєСЂР°СЃРЅС‹С… СЏС‡РµРµРє СЃ РјРѕРЅРµС‚Р°РјРё вЂ” on_coin_collected РЅРёРєРѕРіРґР° РЅРµ РѕРїСѓСЃС‚РёС‚ СЃРїРёСЃРѕРє, СЃРёРіРЅР°Р» РЅРµ РїСЂРёРґС‘С‚.
+		if _bonus_red_cell_count == 0:
+			_schedule_all_bonus_coins_collected_no_coins()
+		return
+		
+	var data = active_red_cells.pop_front()
+	var cell = data["cell"]
+	var col: int = data["col"]
 	
-	show()
-	modulate.a = 0.0
-	create_tween().tween_property(self, "modulate:a", 1.0, 0.3)
+	_stop_snap()
+	# РЈР±РёРІР°РµРј focus tween вЂ” РёРЅР°С‡Рµ РѕРЅ Р±СѓРґРµС‚ РєРѕРЅС„Р»РёРєС‚РѕРІР°С‚СЊ СЃ РїРѕРІРѕСЂРѕС‚РѕРј РєРёРЅРµРјР°С‚РёРєРё
+	if focus_tween and focus_tween.is_running():
+		focus_tween.kill()
+	can_rotate = false
+	is_dragging = false
+	angular_velocity = 0.0
 	
-	for i in range(ItemManager.current_order.size()):
-		var item_data = ItemManager.current_order[i]
-		var entry = entry_scene.instantiate()
-		items_container.add_child(entry)
-		
-		entry.setup(item_data["id"], ItemManager.items_db[item_data["id"]]["texture"])
-		
-		var is_already_found = item_data["found"]
-		entry.set_meta("is_flipped", is_already_found)
-		if is_already_found and entry.has_method("flip_to_front"):
-			entry.flip_to_front()
-		
-		var target_pos = Vector2(0, i * (ITEM_SIZE + SPACING))
-		var diff = small_envelope.position - items_container.position
-		var start_pos = diff + Vector2((small_envelope.size.x - ITEM_SIZE)/2, (small_envelope.size.y - ITEM_SIZE)/2)
-		
-		entry.position = start_pos
-		entry.scale = Vector2(0.1, 0.1)
-		
-		var tw = create_tween().set_parallel(true).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
-		tw.tween_property(entry, "position", target_pos, 0.6).set_delay(i * 0.1)
-		tw.tween_property(entry, "scale", Vector2.ONE, 0.6).set_delay(i * 0.1)
+	# РЈРіРѕР» РєР°РјРµСЂС‹ РѕС‚РЅРѕСЃРёС‚РµР»СЊРЅРѕ С†РµРЅС‚СЂР° С€РєР°С„Р° РІ XZ-РїР»РѕСЃРєРѕСЃС‚Рё.
+	var cam_angle = _get_camera_angle_xz()
+	
+	# РЇС‡РµР№РєР° col СЃС‚РѕРёС‚ РЅР° С†РёР»РёРЅРґСЂРµ РїРѕРґ Р»РѕРєР°Р»СЊРЅС‹Рј СѓРіР»РѕРј col * STEP_ANGLE.
+	# РџСЂРё rotation.y = R РјРёСЂРѕРІРѕР№ СѓРіРѕР» СЏС‡РµР№РєРё = col_angle - R (РёР· РјР°С‚СЂРёС†С‹ РїРѕРІРѕСЂРѕС‚Р° Godot).
+	# РџСЂРёСЂР°РІРЅРёРІР°РµРј Рє cam_angle: col_angle - R = cam_angle => R = col_angle - cam_angle.
+	var target_rot = float(col) * STEP_ANGLE - cam_angle
+	var diff = angle_difference(rotation.y, target_rot)
+	
+	if abs(diff) < deg_to_rad(5.0):
+		diff += TAU
+	
+	var final_angle_rad: float = rotation.y + diff
+	var final_deg: float = rad_to_deg(final_angle_rad)
 
-func _on_item_found(id: int):
-	for entry in items_container.get_children():
-		if int(entry.item_id) == int(id) and not entry.get_meta("is_flipped", false):
-			entry.flip_to_front()
-			entry.set_meta("is_flipped", true)
+	var extra_spin: float = 0.0
+	if _is_first_bonus_reveal:
+		extra_spin = 360.0 if diff >= 0 else -360.0
+		_is_first_bonus_reveal = false
 
-			if not ItemManager.combo_failed:
-				if combo_widget and combo_widget.has_method("show_success"):
-					var total: int = ItemManager.current_order.size()
-					combo_widget.show_success(ItemManager.combo_score, total)
-			break
+	var juicy_final_deg: float = final_deg + extra_spin
 
+	var reveal_duration: float = 1.0 / bonus_reveal_speed_multiplier
+	var post_open_delay: float = 0.6 / (bonus_reveal_speed_multiplier * bonus_post_open_delay_multiplier)
+	if bonus_fixed_post_open_delay >= 0.0:
+		post_open_delay = bonus_fixed_post_open_delay
 
-============================================================
-SCRIPT: side_widget_entry.gd
-PATH: res://Scenes/side_widget_entry.gd
-THESIS: Элемент списка заказа: переворот карточки между back/front.
--------------------- FULL SOURCE ---------------------------
-extends Control
+	var tw := create_tween().set_trans(Tween.TRANS_QUART).set_ease(Tween.EASE_IN_OUT)
+	tw.tween_property(self, "rotation_degrees:y", juicy_final_deg, reveal_duration)
+	tw.tween_callback(func():
+		current_rotation_y = rotation_degrees.y
+		rotation_degrees.y = fmod(rotation_degrees.y, 360.0)
+		current_rotation_y = rotation_degrees.y
 
-@onready var back = $Back
-@onready var front = $Front
+		if is_instance_valid(cell):
+			cell.set_meta("cabinet_col", col)
+			_register_coin_col(col)
+			if cell.has_method("open_doors"):
+				cell.open_doors()
 
-var current_tw: Tween
-var item_id: int = -1
-
-func setup(id: int, texture_path: String):
-	item_id = id
-	front.texture = load(texture_path)
-	front.scale.x = 0 # РЈР±РµР¶РґР°РµРјСЃСЏ, С‡С‚Рѕ Р»РёС†Рѕ СЃРєСЂС‹С‚Рѕ
-	back.scale.x = 1
-	back.show()
-
-# Р¤СѓРЅРєС†РёСЏ РєСЂР°СЃРёРІРѕРіРѕ РїРµСЂРµРІРѕСЂРѕС‚Р° РєР°СЂС‚РѕС‡РєРё
-func flip_to_front():
-	if current_tw and current_tw.is_running():
-		current_tw.kill()
-
-	current_tw = create_tween().bind_node(self).set_ease(Tween.EASE_IN_OUT).set_trans(Tween.TRANS_QUAD)
-
-	current_tw.tween_property(back, "scale:x", 0.0, 0.15)
-	current_tw.tween_callback(back.hide)
-	current_tw.tween_callback(front.show)
-	current_tw.tween_property(front, "scale:x", 1.0, 0.15)
-
-func flip_to_back():
-	if current_tw and current_tw.is_running():
-		current_tw.kill()
-
-	current_tw = create_tween().bind_node(self).set_ease(Tween.EASE_IN_OUT).set_trans(Tween.TRANS_QUAD)
-
-	current_tw.tween_property(front, "scale:x", 0.0, 0.15)
-	current_tw.tween_callback(func():
-		front.hide()
-		back.show()
-	)
-	current_tw.tween_property(back, "scale:x", 1.0, 0.15)
-
-
-============================================================
-SCRIPT: combo_widget.gd
-PATH: res://Scenes/combo_widget.gd
-THESIS: Комбо-виджет: показ успеха/провала, выезд плашки и авто-скрытие.
--------------------- FULL SOURCE ---------------------------
-extends Control
-
-@onready var icon = $ComboIcon
-@onready var plate = $ComboPlate
-@onready var label = $ComboPlate/ComboText
-@onready var envelope = get_node_or_null("../SmallEnvelope")
-
-var anim_tw: Tween
-var is_active: bool = false
-var plate_final_x: float = 0.0
-
-var tex_plate_purple: Texture2D = load("res://Assets/2D/plate_purple.png")
-var tex_plate_red: Texture2D = load("res://Assets/2D/plate_red.png")
-
-func _ready() -> void:
-	plate_final_x = plate.position.x
-
-	hide()
-	plate.modulate.a = 0.0
-	icon.scale = Vector2.ZERO
-
-func show_success(current: int, total: int) -> void:
-	label.text = str(current) + "/" + str(total)
-	plate.texture = tex_plate_purple
-	_play_animation()
-
-func show_fail() -> void:
-	label.text = "COMBO FAILED"
-	plate.texture = tex_plate_red
-	_play_animation()
-
-func _play_animation() -> void:
-	show()
-	is_active = true
-
-	if anim_tw and anim_tw.is_valid():
-		anim_tw.kill()
-
-	if envelope:
-		envelope.hide()
-		envelope.modulate.a = 0.0
-
-	icon.scale = Vector2.ZERO
-	plate.position.x = icon.position.x
-	plate.modulate.a = 0.0
-
-	anim_tw = create_tween()
-
-	anim_tw.tween_property(icon, "scale", Vector2.ONE, 0.3).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
-
-	# 2. Р’С‹РµР·Рґ РїР»Р°С€РєРё (РІРѕР·РІСЂР°С‰Р°РµРј РЅР° СЃРѕС…СЂР°РЅС‘РЅРЅСѓСЋ РїРѕР·РёС†РёСЋ РёР· СЂРµРґР°РєС‚РѕСЂР°)
-	anim_tw.parallel().tween_property(plate, "position:x", plate_final_x, 0.3).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT).set_delay(0.15)
-	anim_tw.parallel().tween_property(plate, "modulate:a", 1.0, 0.2).set_delay(0.15)
-
-	anim_tw.chain().tween_interval(3.0)
-
-	anim_tw.chain().tween_property(plate, "position:x", icon.position.x, 0.15).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN)
-	anim_tw.parallel().tween_property(plate, "modulate:a", 0.0, 0.15).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN)
-
-	anim_tw.chain().tween_property(icon, "scale", Vector2.ZERO, 0.15).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_IN)
-
-	anim_tw.chain().tween_callback(func():
-		hide()
-		is_active = false
-		if envelope:
-			envelope.show()
-			var env_tw = create_tween()
-			env_tw.tween_property(envelope, "modulate:a", 1.0, 0.15).set_trans(Tween.TRANS_SINE)
-	)
-
-
-
-============================================================
-SCRIPT: perfect_popup.gd
-PATH: res://Scenes/perfect_popup.gd
-THESIS: Полноэкранный Perfect-попап с затемнением, glint-шейдером и интро/аутро анимацией.
--------------------- FULL SOURCE ---------------------------
-extends Control
-
-var overlay: ColorRect
-var popup_img: TextureRect
-var _shader_mat: ShaderMaterial
-
-func _ready() -> void:
-	set_anchors_preset(Control.PRESET_FULL_RECT)
-
-	overlay = ColorRect.new()
-	overlay.color = Color(0, 0, 0, 0.0)
-	overlay.set_anchors_preset(Control.PRESET_FULL_RECT)
-	overlay.size = get_viewport_rect().size
-	add_child(overlay)
-
-	popup_img = TextureRect.new()
-	popup_img.texture = load("res://Assets/UI/Perfect_Memory.png")
-	popup_img.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-	popup_img.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-	popup_img.custom_minimum_size = Vector2(988, 982)
-	popup_img.size = Vector2(988, 982)
-	popup_img.pivot_offset = popup_img.size / 2.0
-	popup_img.scale = Vector2.ZERO
-	add_child(popup_img)
-
-	_shader_mat = ShaderMaterial.new()
-	_shader_mat.shader = load("res://Shaders/glint.gdshader")
-	_shader_mat.set_shader_parameter("progress", 0.0)
-	popup_img.material = _shader_mat
-
-	hide()
-
-func play_animation(on_complete: Callable) -> void:
-	show()
-	var screen_size: Vector2 = get_viewport_rect().size
-	overlay.size = screen_size
-	popup_img.position = (screen_size / 2.0) - popup_img.pivot_offset
-
-	var tw := create_tween().set_parallel(true)
-	tw.tween_property(overlay, "color:a", 0.7, 0.4)
-	tw.tween_property(popup_img, "scale", Vector2(1.0, 1.0), 0.6).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
-	tw.tween_method(
-		func(v: float): _shader_mat.set_shader_parameter("progress", v),
-		0.0, 1.0, 0.6
-	).set_trans(Tween.TRANS_SINE).set_delay(0.35)
-
-	var start_y: float = popup_img.position.y
-	var amp: float = 15.0
-	var float_tw := create_tween().set_loops()
-	float_tw.tween_property(popup_img, "position:y", start_y - amp, 1.5).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT).set_delay(0.6)
-	float_tw.tween_property(popup_img, "position:y", start_y + amp, 3.0).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
-	float_tw.tween_property(popup_img, "position:y", start_y, 1.5).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
-
-	get_tree().create_timer(2.5).timeout.connect(func():
-		if float_tw.is_valid():
-			float_tw.kill()
-		var outro := create_tween().set_parallel(true)
-		outro.tween_property(overlay, "color:a", 0.0, 0.2)
-		outro.tween_property(popup_img, "scale", Vector2.ZERO, 0.25).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_IN)
-		outro.chain().tween_callback(func():
-			hide()
-			on_complete.call()
-			queue_free()
+		get_tree().create_timer(post_open_delay).timeout.connect(func():
+			can_rotate = true
+			angular_velocity = 0.0
+			current_rotation_y = rotation_degrees.y
+			callback.call()
 		)
 	)
+
+func _place_caps_sync(duration: float) -> void:
+	if cap_scene == null: return
+	var s_xz = BLENDER_RADIUS / CAP_FIT_RADIUS
+	var cap_scale = Vector3(s_xz, 1.0, s_xz)
+	var t = create_tween().set_parallel(true)
+
+	var bottom = cap_scene.instantiate() as Node3D
+	add_child(bottom)
+	bottom.scale = Vector3(0.001, 0.001, 0.001)
+	bottom.position = Vector3(0.0, CAP_BOTTOM_Y - 15.0, 0.0)
+	t.tween_property(bottom, "position", Vector3(0.0, CAP_BOTTOM_Y, 0.0), duration).set_trans(trans_type).set_ease(ease_type)
+	t.tween_property(bottom, "scale", cap_scale, duration).set_trans(trans_type).set_ease(ease_type)
+
+	var top = cap_scene.instantiate() as Node3D
+	add_child(top)
+	top.scale = Vector3(0.001, 0.001, 0.001)
+	var top_y = (float(ROWS - 1) * CELL_HEIGHT * VERTICAL_SPACING) + CELL_HEIGHT + CAP_TOP_Y_MARGIN
+	top.position = Vector3(0.0, top_y + 15.0, 0.0)
+	t.tween_property(top, "position", Vector3(0.0, top_y, 0.0), duration).set_trans(trans_type).set_ease(ease_type)
+	t.tween_property(top, "scale", cap_scale, duration).set_trans(trans_type).set_ease(ease_type)
+
+# =============================================================
+# РџРћРЎР›Р•Р”РћР’РђРўР•Р›Р¬РќРћРЎРўР¬ РЎР‘РћР Рђ РњРћРќР•Рў (РІСЃРµРіРґР° СЃР»РµРІР° РЅР°РїСЂР°РІРѕ)
+# =============================================================
+
+func _schedule_all_bonus_coins_collected_no_coins() -> void:
+	if _no_bonus_close_pending:
+		return
+	_no_bonus_close_pending = true
+	var session := _reward_session_id
+	_no_bonus_complete_timer = get_tree().create_timer(0.2)
+	_no_bonus_complete_timer.timeout.connect(func():
+		_no_bonus_complete_timer = null
+		_no_bonus_close_pending = false
+		if session != _reward_session_id:
+			return
+		if is_instance_valid(self):
+			is_level_finished = true
+			can_rotate = false
+			angular_velocity = 0.0
+			all_rewards_collected_visually.emit()
+			all_bonus_coins_collected.emit()
+	)
+
+# Р РµРіРёСЃС‚СЂРёСЂСѓРµРј РѕС‚РєСЂС‹С‚СѓСЋ СЏС‡РµР№РєСѓ СЃ РјРѕРЅРµС‚РѕР№ РІ РїРѕСЂСЏРґРєРµ РєРѕР»РѕРЅРѕРє
+func _register_coin_col(col: int) -> void:
+	if not col in unlocked_coin_cols:
+		unlocked_coin_cols.append(col)
+		unlocked_coin_cols.sort()  # РЎРѕСЂС‚РёСЂСѓРµРј РїРѕ РІРѕР·СЂР°СЃС‚Р°РЅРёСЋ в†’ СЃР»РµРІР° РЅР°РїСЂР°РІРѕ
+
+# Р’С‹Р·С‹РІР°РµС‚СЃСЏ РёР· coin_3d.gd РІ РЅР°С‡Р°Р»Рµ СЃР±РѕСЂР° РјРѕРЅРµС‚С‹ (РґРѕ РїРѕР»С‘С‚Р°); Р·РґРµСЃСЊ Р¶Рµ СѓС‡РёС‚С‹РІР°РµРј +1 Рє Р»РµС‚СЏС‰РёРј.
+# РЎР»РµРґСѓСЋС‰РµР№ РІСЃРµРіРґР° СЃС‚Р°РЅРѕРІРёС‚СЃСЏ СЏС‡РµР№РєР° РџР РђР’Р•Р• СЃРѕР±СЂР°РЅРЅРѕР№ (РїРѕ РІРѕР·СЂР°СЃС‚Р°РЅРёСЋ РєРѕР»РѕРЅРєРё),
+# Р° РµСЃР»Рё РїСЂР°РІРµРµ РЅРёС‡РµРіРѕ РЅРµС‚ вЂ” РїРµСЂРµС…РѕРґРёРј Рє РєСЂР°Р№РЅРµР№ Р»РµРІРѕР№ РёР· РѕСЃС‚Р°РІС€РёС…СЃСЏ.
+func on_coin_collected(col: int) -> void:
+	var idx := unlocked_coin_cols.find(col)
+	if idx < 0:
+		return  # РњРѕРЅРµС‚РєР° СѓР¶Рµ РЅРµ РІ СЃРїРёСЃРєРµ вЂ” РЅРёС‡РµРіРѕ РЅРµ РґРµР»Р°РµРј
+	unlocked_coin_cols.remove_at(idx)
+	_coins_in_flight += 1
+
+	if unlocked_coin_cols.is_empty():
+		can_rotate = true
+		angular_velocity = 0.0
+		return
+
+	# РџРѕСЃР»Рµ СѓРґР°Р»РµРЅРёСЏ idx СѓРєР°Р·С‹РІР°РµС‚ СЂРѕРІРЅРѕ РЅР° СЃР»РµРґСѓСЋС‰СѓСЋ РїСЂР°РІСѓСЋ СЏС‡РµР№РєСѓ.
+	# Р•СЃР»Рё Р±С‹Р»Рё РІ РєРѕРЅС†Рµ СЃРїРёСЃРєР° вЂ” % РѕР±РѕСЂР°С‡РёРІР°РµС‚ Рє РєСЂР°Р№РЅРµР№ Р»РµРІРѕР№.
+	var next_col: int = unlocked_coin_cols[idx % unlocked_coin_cols.size()]
+	_rotate_to_coin_col(next_col)
+
+# РџРѕРІРѕСЂРѕС‚ Рє РіСЂР°РЅРё СЃ РјРѕРЅРµС‚РѕР№ вЂ” РІСЃРµРіРґР° РІ РїРѕР»РѕР¶РёС‚РµР»СЊРЅРѕРј РЅР°РїСЂР°РІР»РµРЅРёРё (СЃР»РµРІР° РЅР°РїСЂР°РІРѕ)
+func _rotate_to_coin_col(next_col: int) -> void:
+	can_rotate = false
+	_stop_snap()
+	if focus_tween and focus_tween.is_running(): focus_tween.kill()
+	if coin_seq_tween and coin_seq_tween.is_running(): coin_seq_tween.kill()
+	angular_velocity = 0.0
+
+	var cam_angle := _get_camera_angle_xz()
+	var target_rot := float(next_col) * STEP_ANGLE - cam_angle
+
+	# РџРѕР»РѕР¶РёС‚РµР»СЊРЅС‹Р№ РїРѕРІРѕСЂРѕС‚ (СЃР»РµРІР° РЅР°РїСЂР°РІРѕ): РёСЃРїРѕР»СЊР·СѓРµРј wrapf РІ [0, TAU).
+	var diff := wrapf(target_rot - rotation.y, 0.0, TAU)
+	# Р•СЃР»Рё СѓР¶Рµ СЃРјРѕС‚СЂРёРј РЅР° СЌС‚Сѓ РјРѕРЅРµС‚РєСѓ вЂ” РЅРµ РєСЂСѓС‚РёРј, РёРіСЂРѕРє СЃСЂР°Р·Сѓ РІРёРґРёС‚ РµС‘.
+	if diff < deg_to_rad(3.0):
+		return
+
+	var target_coin_deg: float = rad_to_deg(rotation.y + diff)
+	coin_seq_tween = create_tween().set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
+	coin_seq_tween.tween_property(self, "rotation_degrees:y", target_coin_deg, 0.7)
+	coin_seq_tween.finished.connect(func(): current_rotation_y = rotation_degrees.y)
+
+
+func _on_bonus_coin_flight_finished() -> void:
+	_coins_in_flight = maxi(_coins_in_flight - 1, 0)
+
+	if _coins_in_flight == 0 and unlocked_coin_cols.is_empty() and active_red_cells.is_empty():
+		if is_instance_valid(self):
+			is_level_finished = true
+			can_rotate = false
+			angular_velocity = 0.0
+			all_rewards_collected_visually.emit()
+			all_bonus_coins_collected.emit()
 
 
 
 ============================================================
 SCRIPT: cell_border.gd
 PATH: res://Scenes/cell_border.gd
-THESIS: Отрисовка рамок ячейки (default/dashed/focused) с анимированной пунктирной обводкой.
+THESIS: Custom draw: рамки ячейки (solid + анимированный dashed).
 -------------------- FULL SOURCE ---------------------------
 extends Control
 
@@ -3589,7 +2834,7 @@ func _get_rounded_rect_points(rect: Rect2, r: float, points_per_arc: int) -> Pac
 ============================================================
 SCRIPT: cell_red.gd
 PATH: res://Scenes/cell_red.gd
-THESIS: Красная бонусная ячейка: открывает двери, запускает конфетти и активирует награду.
+THESIS: Красная бонус-ячейка: двери, конфетти, unlock дочерних наград.
 -------------------- FULL SOURCE ---------------------------
 extends Node3D
 
@@ -3676,79 +2921,1084 @@ func _setup_confetti_particles() -> void:
 
 
 ============================================================
-SCRIPT: attempts_widget.gd
-PATH: res://Scenes/attempts_widget.gd
-THESIS: UI-виджет попыток: слушает ItemManager, обновляет счетчик и проигрывает пульс/блик при списании.
+SCRIPT: coin_3d.gd
+PATH: res://Scenes/coin_3d.gd
+THESIS: Бонусная монета: разблокировка, полёт, связь с шкафом.
+-------------------- FULL SOURCE ---------------------------
+extends Node3D
+
+var is_collected = false
+var is_unlocked = false
+
+func unlock():
+	is_unlocked = true
+
+	# РќРµР±РѕР»СЊС€Р°СЏ РїР°СѓР·Р° (0.4 СЃРµРє), С‡С‚РѕР±С‹ РёРіСЂРѕРє СѓСЃРїРµР» РЅР°СЃР»Р°РґРёС‚СЊСЃСЏ РІР·СЂС‹РІРѕРј РєРѕРЅС„РµС‚С‚Рё
+	# Рё РѕСЃРѕР·РЅР°С‚СЊ РЅР°РіСЂР°РґСѓ, РїСЂРµР¶РґРµ С‡РµРј РѕРЅР° СѓР»РµС‚РёС‚
+	get_tree().create_timer(0.4).timeout.connect(func():
+		if not is_collected:
+			is_collected = true
+			collect_coin()
+	)
+
+func collect_coin():
+	if not is_inside_tree(): return
+
+	var main_scene = get_tree().current_scene
+
+	# РС‰РµРј С€РєР°С„, РїРѕРґРЅРёРјР°СЏСЃСЊ РїРѕ СЂРѕРґРёС‚РµР»СЏРј
+	var cabinet_node = get_parent()
+	while cabinet_node != null and not cabinet_node.has_method("reveal_next_bonus_cell"):
+		cabinet_node = cabinet_node.get_parent()
+
+	if cabinet_node == null:
+		printerr("РћРЁРР‘РљРђ: РЁРєР°С„ РЅРµ РЅР°Р№РґРµРЅ! РђРЅРёРјР°С†РёСЏ РѕС‚РјРµРЅРµРЅР°.")
+		is_collected = false
+		return
+
+	# Р—Р°РїРѕРјРёРЅР°РµРј РєРѕР»РѕРЅРєСѓ Р”Рћ С‚РѕРіРѕ РєР°Рє РїРµСЂРµРїСЂРёРІСЏР¶РµРјСЃСЏ Рє main_scene.
+	# РњРµС‚Р°РґР°РЅРЅС‹Рµ "cabinet_col" СѓСЃС‚Р°РЅР°РІР»РёРІР°СЋС‚СЃСЏ С€РєР°С„РѕРј РІ reveal_next_bonus_cell.
+	var my_col: int = -1
+	var parent_cell = get_parent()
+	if parent_cell and parent_cell.has_meta("cabinet_col"):
+		my_col = parent_cell.get_meta("cabinet_col")
+
+	# Р’С‹С‡РёСЃР»СЏРµРј РЅР°РїСЂР°РІР»РµРЅРёРµ РѕС‚ С†РµРЅС‚СЂР° С€РєР°С„Р° Рє РјРѕРЅРµС‚РєРµ (С‚РѕР»СЊРєРѕ РїРѕ XZ).
+	var direction_out = global_position - cabinet_node.global_position
+	direction_out.y = 0
+	if direction_out.length_squared() < 0.0001:
+		direction_out = -global_basis.z
+		direction_out.y = 0
+	direction_out = direction_out.normalized()
+
+	var out_distance = 1.2
+	var final_out_pos = global_position + (direction_out * out_distance)
+
+	# РЎРѕРѕР±С‰Р°РµРј С€РєР°С„Сѓ РЎР РђР—РЈ вЂ” РїРѕРІРѕСЂРѕС‚ Рє СЃР»РµРґСѓСЋС‰РµР№ РјРѕРЅРµС‚Рµ РЅР°С‡РёРЅР°РµС‚СЃСЏ РїР°СЂР°Р»Р»РµР»СЊРЅРѕ СЃ Р°РЅРёРјР°С†РёРµР№
+	if my_col >= 0 and is_instance_valid(cabinet_node) and cabinet_node.has_method("on_coin_collected"):
+		cabinet_node.on_coin_collected(my_col)
+
+	var tw = create_tween().set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+
+	# РћС‚СЂС‹РІР°РµРј РѕС‚ С€РєР°С„Р° (РїРµСЂРµРїСЂРёРІСЏР·РєР° Рє main_scene РґР»СЏ СЃРІРѕР±РѕРґРЅРѕРіРѕ РїРѕР»С‘С‚Р°)
+	tw.tween_callback(func():
+		var old_global_transform = global_transform
+		if get_parent():
+			get_parent().remove_child(self)
+		main_scene.add_child(self)
+		global_transform = old_global_transform
+	)
+
+	# РЁР°Рі 1: Р‘С‹СЃС‚СЂРѕ РІС‹РґРІРёРіР°РµРј РёР· СЏС‡РµР№РєРё
+	tw.tween_property(self, "global_position", final_out_pos, 0.18)
+	tw.tween_interval(0.1)
+
+	# РЁР°Рі 2: Р›РµС‚РёРј РІРІРµСЂС… СЃ РІСЂР°С‰РµРЅРёРµРј
+	var spin_degrees = 360.0
+	var up_distance = 10.0
+	tw.parallel().tween_property(self, "global_position:y", final_out_pos.y + up_distance, 1.2)
+	tw.parallel().tween_property(self, "rotation_degrees:y", rotation_degrees.y + spin_degrees, 1.2).set_ease(Tween.EASE_IN_OUT)
+
+	tw.tween_callback(func():
+		if cabinet_node and is_instance_valid(cabinet_node) and cabinet_node.has_method("_on_bonus_coin_flight_finished"):
+			cabinet_node._on_bonus_coin_flight_finished()
+		queue_free()
+	)
+
+
+
+============================================================
+SCRIPT: combo_widget.gd
+PATH: res://Scenes/combo_widget.gd
+THESIS: Индикатор комбо: успех/провал и короткая анимация.
 -------------------- FULL SOURCE ---------------------------
 extends Control
 
-@onready var heart_icon = $HeartIcon
-@onready var count_label = $HeartIcon/CountLabel
+@onready var icon = $ComboIcon
+@onready var plate = $ComboPlate
+@onready var label = $ComboPlate/ComboText
+@onready var envelope = get_node_or_null("../SmallEnvelope")
 
-var pulse_tween: Tween
-var _shader_mat: ShaderMaterial
+var anim_tw: Tween
+var is_active: bool = false
+var plate_final_x: float = 0.0
+
+var tex_plate_purple: Texture2D = load("res://Assets/2D/plate_purple.png")
+var tex_plate_red: Texture2D = load("res://Assets/2D/plate_red.png")
+
+func _ready() -> void:
+	plate_final_x = plate.position.x
+
+	hide()
+	plate.modulate.a = 0.0
+	icon.scale = Vector2.ZERO
+
+func show_success(current: int, total: int) -> void:
+	label.text = str(current) + "/" + str(total)
+	plate.texture = tex_plate_purple
+	_play_animation()
+
+func show_fail() -> void:
+	label.text = "COMBO FAILED"
+	plate.texture = tex_plate_red
+	_play_animation()
+
+func _play_animation() -> void:
+	show()
+	is_active = true
+
+	if anim_tw and anim_tw.is_valid():
+		anim_tw.kill()
+
+	if envelope:
+		envelope.hide()
+		envelope.modulate.a = 0.0
+
+	icon.scale = Vector2.ZERO
+	plate.position.x = icon.position.x
+	plate.modulate.a = 0.0
+
+	anim_tw = create_tween()
+
+	anim_tw.tween_property(icon, "scale", Vector2.ONE, 0.3).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+
+	# 2. Р’С‹РµР·Рґ РїР»Р°С€РєРё (РІРѕР·РІСЂР°С‰Р°РµРј РЅР° СЃРѕС…СЂР°РЅС‘РЅРЅСѓСЋ РїРѕР·РёС†РёСЋ РёР· СЂРµРґР°РєС‚РѕСЂР°)
+	anim_tw.parallel().tween_property(plate, "position:x", plate_final_x, 0.3).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT).set_delay(0.15)
+	anim_tw.parallel().tween_property(plate, "modulate:a", 1.0, 0.2).set_delay(0.15)
+
+	anim_tw.chain().tween_interval(3.0)
+
+	anim_tw.chain().tween_property(plate, "position:x", icon.position.x, 0.15).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN)
+	anim_tw.parallel().tween_property(plate, "modulate:a", 0.0, 0.15).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN)
+
+	anim_tw.chain().tween_property(icon, "scale", Vector2.ZERO, 0.15).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_IN)
+
+	anim_tw.chain().tween_callback(func():
+		hide()
+		is_active = false
+		if envelope:
+			envelope.show()
+			var env_tw = create_tween()
+			env_tw.tween_property(envelope, "modulate:a", 1.0, 0.15).set_trans(Tween.TRANS_SINE)
+	)
+
+
+
+============================================================
+SCRIPT: Item_3d.gd
+PATH: res://Scenes/Item_3d.gd
+THESIS: Кликабельный 3D-предмет в шкафу: текстура, сигнал в ItemManager, hide/show.
+-------------------- FULL SOURCE ---------------------------
+extends Node3D
+
+var item_id: int
+var texture_path: String
+
+func setup(id: int):
+	item_id = id
+	var item_data = ItemManager.items_db.get(id)
+	if item_data:
+		texture_path = item_data["texture"]
+		if has_node("Sprite3D"):
+			$Sprite3D.texture = load(texture_path)
+
+func _ready():
+	if has_node("Area3D"):
+		$Area3D.input_event.connect(_on_area_3d_input_event)
+
+func _on_area_3d_input_event(_camera, event, _position, _normal, _shape_idx):
+	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
+		if event.pressed:
+			# РџРµСЂРµРґР°РµРј СЃСЃС‹Р»РєСѓ РЅР° СЃРµР±СЏ (self)
+			ItemManager.item_pressed.emit(item_id, texture_path, self)
+
+# --- РќРћР’Р«Р• Р¤РЈРќРљР¦РР Р”Р›РЇ РџР РЇРўРђРќР¬РЇ РџР Р•Р”РњР•РўРђ ---
+func hide_item():
+	if has_node("Sprite3D"):
+		$Sprite3D.hide()
+
+func show_item():
+	if has_node("Sprite3D"):
+		$Sprite3D.show()
+
+
+============================================================
+SCRIPT: main_scene.gd
+PATH: res://Scenes/main_scene.gd
+THESIS: Корневая сцена раунда: таймер, ордер, drag-drop, автосбор, кинематика шкафа и финал уровня.
+-------------------- FULL SOURCE ---------------------------
+extends Node3D
+
+signal autofill_finished
+
+@onready var order_popup = $UILayer/Order_PopUp
+@onready var env_back = $UILayer/Order_PopUp/EnvelopeBack
+@onready var env_front = $UILayer/Order_PopUp/EnvelopeFront
+@onready var letter = $UILayer/Order_PopUp/LetterContainer
+@onready var start_button = $UILayer/Start_Button
+@onready var ready_button = $UILayer/Ready_Button
+@onready var timer_label = $UILayer/Order_PopUp/LetterContainer/LetterPaper/Timer
+@onready var side_widget = $UILayer/SideWidget
+@onready var backpack_widget = $UILayer/BackpackWidget
+@onready var drag_preview = $UILayer/DragPreview
+@onready var autofill_button = get_node_or_null("UILayer/AutofillButton")
+@onready var attempts_widget = get_node_or_null("UILayer/AttemptsWidget")
+
+@export_group("РЎСЃС‹Р»РєРё РЅР° РѕР±СЉРµРєС‚С‹")
+@export var cabinet: Node3D
+
+@export_group("РќР°СЃС‚СЂРѕР№РєРё Р’СЂРµРјРµРЅРё")
+@export var total_time: float = 10.0
+
+@export_group("РљРѕРЅРІРµСЂС‚ (Envelope)")
+@export var env_intro_fade: float = 0.2
+@export var env_intro_start_y: float = 2300.0
+@export var env_intro_end_y: float = 1800.0
+@export var env_intro_duration: float = 1.0
+@export var env_intro_trans: Tween.TransitionType = Tween.TRANS_CIRC
+@export var env_intro_ease: Tween.EaseType = Tween.EASE_OUT
+@export var env_outro_fade: float = 0.3
+@export var env_outro_end_y: float = 2300.0
+@export var env_outro_duration: float = 0.8
+@export var env_outro_trans: Tween.TransitionType = Tween.TRANS_CIRC
+@export var env_outro_ease: Tween.EaseType = Tween.EASE_IN
+
+@export_group("РџРёСЃСЊРјРѕ (Letter)")
+@export var let_intro_delay: float = 0.3
+@export var let_intro_fade: float = 0.2
+@export var let_intro_start_y: float = -2000.0
+@export var let_intro_end_y: float = 500.0 
+@export var let_intro_start_scale_y: float = 0.1
+@export var let_intro_end_scale_y: float = 1.0
+@export var let_intro_duration: float = 0.5
+@export var let_intro_trans: Tween.TransitionType = Tween.TRANS_CIRC
+@export var let_intro_ease: Tween.EaseType = Tween.EASE_OUT
+@export var let_outro_delay: float = 0.0
+@export var let_outro_fade: float = 0.3
+@export var let_outro_end_y: float = -2000.0
+@export var let_outro_start_scale_y: float = 1.0
+@export var let_outro_end_scale_y: float = 0.5
+@export var let_outro_duration: float = 0.5
+@export var let_outro_trans: Tween.TransitionType = Tween.TRANS_CIRC
+@export var let_outro_ease: Tween.EaseType = Tween.EASE_IN
+
+var time_left: float
+var is_timer_active: bool = false
+var is_game_started: bool = false
+
+var potential_drag_id: int = -1
+var potential_drag_tex: String = ""
+var potential_drag_node: Node3D = null 
+var current_drag_node: Node3D = null   
+var drag_start_pos: Vector2 = Vector2.ZERO
+const DRAG_THRESHOLD: float = 15.0 
+
+var cinematic_queue: int = 0
+var is_cinematic_playing: bool = false
+var is_autofill_animating: bool = false
+var fast_cinematic_count: int = 0
+var autofill_cab_tween: Tween
+
+func _ready():
+	ItemManager.reset_level_state()
+
+	if start_button: start_button.pressed.connect(_on_start_pressed)
+	if ready_button: ready_button.pressed.connect(_on_ready_pressed)
+	if autofill_button:
+		autofill_button.pressed.connect(_on_autofill_pressed)
+		autofill_button.hide()
+	
+	ready_button.modulate.a = 0.0; ready_button.hide()
+	env_back.modulate.a = 0.0; env_front.modulate.a = 0.0; letter.modulate.a = 0.0
+	
+	if side_widget: side_widget.hide()
+	if backpack_widget: backpack_widget.hide()
+	if drag_preview: drag_preview.hide()
+	if cabinet: cabinet.hide()
+	if attempts_widget: attempts_widget.hide()
+
+	if cabinet:
+		cabinet.all_rewards_collected_visually.connect(_on_all_rewards_collected_visually)
+
+	ItemManager.item_pressed.connect(_on_item_pressed)
+
+	ItemManager.perfect_clear_achieved.connect(_on_perfect_clear)
+	ItemManager.level_completed.connect(_on_level_completed_normal)
+	ItemManager.combo_broken.connect(_on_combo_broken)
+	ItemManager.item_unfound.connect(_on_item_unfound)
+	ItemManager.out_of_attempts.connect(_on_out_of_attempts)
+
+func _on_item_unfound(id: int):
+	if not side_widget:
+		return
+	var items_container = side_widget.items_container
+	var flipped_entries = []
+	for entry in items_container.get_children():
+		if int(entry.item_id) == int(id) and entry.get_meta("is_flipped", false):
+			flipped_entries.append(entry)
+
+	if flipped_entries.size() > 0:
+		var entry = flipped_entries.back()
+		entry.flip_to_back()
+		entry.set_meta("is_flipped", false)
+
+func _trigger_backpack_jump() -> void:
+	# РџСЂСЏС‡РµРј UI РїРµСЂРµРґ С„РёРЅР°Р»СЊРЅС‹Рј РїСЂС‹Р¶РєРѕРј
+	if side_widget: side_widget.hide()
+	if attempts_widget: attempts_widget.hide()
+	if autofill_button: autofill_button.hide()
+
+	# Р—Р°РїСѓСЃРєР°РµРј СЃР°Рј РїСЂС‹Р¶РѕРє
+	if backpack_widget and backpack_widget.has_method("start_order_completed_sequence"):
+		backpack_widget.start_order_completed_sequence()
+
+func _on_all_rewards_collected_visually() -> void:
+	_trigger_backpack_jump()
+
+func _on_combo_broken() -> void:
+	if side_widget and side_widget.has_node("ComboWidget"):
+		var cw = side_widget.get_node("ComboWidget")
+		if cw.has_method("show_fail"):
+			cw.show_fail()
+
+func _on_perfect_clear() -> void:
+	if is_autofill_animating:
+		await autofill_finished
+
+	var popup: Control = load("res://Scenes/perfect_popup.gd").new() as Control
+	popup.z_index = 400
+	$UILayer.add_child(popup)
+	popup.set_anchors_preset(Control.PRESET_FULL_RECT)
+	popup.play_animation(func():
+		cinematic_queue = 3
+		_play_next_cinematic()
+	)
+
+	# РќРµС‚ С€РєР°С„Р° вЂ” СЃРёРіРЅР°Р»Р° all_rewards_collected_visually РЅРµ Р±СѓРґРµС‚; РІР·Р»С‘С‚ С‡РµСЂРµР· 1СЃ РїРѕСЃР»Рµ РїРѕСЏРІР»РµРЅРёСЏ Perfect
+	if cabinet == null:
+		get_tree().create_timer(1.0).timeout.connect(_on_all_rewards_collected_visually)
+
+func _on_level_completed_normal() -> void:
+	if ItemManager.combo_failed:
+		# Р•СЃР»Рё С€РєР°С„ РµС‰Рµ РєСЂСѓС‚РёС‚СЃСЏ РѕС‚ Р°РІС‚РѕСЃР±РѕСЂР° - Р¶РґРµРј!
+		if is_autofill_animating:
+			await autofill_finished
+
+		_trigger_backpack_jump()
+
+func _on_out_of_attempts() -> void:
+	var popup_scene = load("res://Scenes/OutOfAttemptsPopup.tscn")
+	if not popup_scene:
+		printerr("РќРµ СѓРґР°Р»РѕСЃСЊ Р·Р°РіСЂСѓР·РёС‚СЊ OutOfAttemptsPopup.tscn!")
+		return
+
+	var popup_instance = popup_scene.instantiate()
+	$UILayer.add_child(popup_instance)
+
+	if popup_instance.has_signal("popup_closed"):
+		popup_instance.connect("popup_closed", func(action: String):
+			if action == "continue":
+				_trigger_backpack_jump()
+			elif action == "autofill":
+				_play_ad_autofill_sequence()
+		)
+	else:
+		printerr("РћРЁРР‘РљРђ: РЎРёРіРЅР°Р» 'popup_closed' РЅРµ РЅР°Р№РґРµРЅ РІ out_of_attempts_popup.gd.")
+
+	popup_instance.open_popup(attempts_widget)
+
+func _play_ad_autofill_sequence() -> void:
+	await get_tree().create_timer(0.3).timeout
+	_on_autofill_pressed()
+	# РџСЂС‹Р¶РѕРє Р·РґРµСЃСЊ Р±РѕР»СЊС€Рµ РЅРµ РІС‹Р·С‹РІР°РµРј! РћРЅ РІС‹Р·РѕРІРµС‚СЃСЏ Р°РІС‚РѕРјР°С‚РёС‡РµСЃРєРё
+	# С‡РµСЂРµР· _on_level_completed_normal, РєРѕРіРґР° _on_autofill_pressed Р·Р°РєРѕРЅС‡РёС‚ Р°РЅРёРјР°С†РёСЋ С€РєР°С„Р°.
+
+func _process(delta):
+	if is_timer_active and time_left > 0:
+		time_left -= delta
+		if timer_label: timer_label.text = str(ceil(time_left)) + "s"
+		if time_left <= 0: _on_timer_timeout()
+			
+	if cinematic_queue > 0 and not is_cinematic_playing and not ItemManager.is_dragging_item and not is_autofill_animating:
+		_play_next_cinematic()
+
+func _play_next_cinematic():
+	is_cinematic_playing = true
+	cinematic_queue -= 1
+	if cabinet and cabinet.has_method("reveal_next_bonus_cell"):
+		var use_fast = fast_cinematic_count > 0
+		if use_fast:
+			fast_cinematic_count -= 1
+		if cabinet.has_method("set_bonus_reveal_speed_multiplier"):
+			cabinet.set_bonus_reveal_speed_multiplier(2.0 if use_fast else 1.0)
+		if cabinet.has_method("set_bonus_post_open_delay_multiplier"):
+			cabinet.set_bonus_post_open_delay_multiplier(2.0 if use_fast else 1.0)
+		if cabinet.has_method("set_bonus_fixed_post_open_delay"):
+			cabinet.set_bonus_fixed_post_open_delay(0.25 if use_fast else -1.0)
+		cabinet.reveal_next_bonus_cell(func(): is_cinematic_playing = false)
+	else:
+		is_cinematic_playing = false
+
+func _find_cabinet_item_node(parent_node: Node, target_id: int, ignore_list: Array = []) -> Node3D:
+	if parent_node == null:
+		return null
+	if not parent_node in ignore_list:
+		if "id" in parent_node and parent_node.get("id") == target_id: return parent_node as Node3D
+		if "item_id" in parent_node and parent_node.get("item_id") == target_id: return parent_node as Node3D
+	for child in parent_node.get_children():
+		var found = _find_cabinet_item_node(child, target_id, ignore_list)
+		if found: return found
+	return null
+
+func _on_autofill_pressed():
+	if not is_game_started or not backpack_widget or is_cinematic_playing or is_autofill_animating: return
+	if ItemManager.is_dragging_item or backpack_widget.is_dragging_internal: return
+
+	# РЎРћР‘РР РђР•Рњ Р Р•РђР›Р¬РќР«Р• Р”РђРќРќР«Р• РР— РЁРљРђР¤Рђ
+	var required_data = []
+	var used_cab_nodes = []
+	for task in ItemManager.current_order:
+		if not task["found"]:
+			var id = task["id"]
+			var cab_node = _find_cabinet_item_node(cabinet, id, used_cab_nodes)
+			var actual_shape = []
+
+			# Р‘РµСЂРµРј СЃРіРµРЅРµСЂРёСЂРѕРІР°РЅРЅСѓСЋ С„РѕСЂРјСѓ РїСЂСЏРјРѕ РёР· 3D-РїСЂРµРґРјРµС‚Р°
+			if cab_node and cab_node.has_meta("puzzle_shape"):
+				actual_shape = cab_node.get_meta("puzzle_shape")
+				used_cab_nodes.append(cab_node)
+			else:
+				actual_shape = ItemManager.items_db[id].get("shape", [Vector2.ZERO])
+
+			required_data.append({
+				"id": id,
+				"shape": actual_shape,
+				"cab_node": cab_node
+			})
+
+	if required_data.size() == 0: return
+
+	# РџР•Р Р•Р”РђР•Рњ Р Р•РђР›Р¬РќР«Р• Р”РђРќРќР«Р• Р’ Р Р®РљР—РђРљ
+	var placements = backpack_widget.auto_fill_and_optimize(required_data)
+	if placements.size() == 0: return
+
+	is_autofill_animating = true
+
+	var fly_data_array = []
+	for place_data in placements:
+		var cab_node = place_data["cab_node"]
+		fly_data_array.append({
+			"id": place_data["id"],
+			"cell": place_data["cell"],
+			"cab_node": cab_node,
+			"start_y": cab_node.global_position.y if cab_node else -9999.0
+		})
+		if cab_node and is_instance_valid(cab_node) and is_instance_valid(place_data["cell"]):
+			place_data["cell"].set_meta("source_drag_node", cab_node)
+
+	fly_data_array.sort_custom(func(a, b): return a["start_y"] > b["start_y"])
+
+	var total_anim_time = 1.0 + (fly_data_array.size() * 0.15)
+	if cabinet:
+		if autofill_cab_tween and autofill_cab_tween.is_running():
+			autofill_cab_tween.kill()
+		autofill_cab_tween = create_tween().bind_node(self).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
+		autofill_cab_tween.tween_property(cabinet, "rotation_degrees:y", cabinet.rotation_degrees.y + 720.0, total_anim_time)
+
+	var cam = get_viewport().get_camera_3d()
+	var queue_before = cinematic_queue
+	for i in range(fly_data_array.size()):
+		var data = fly_data_array[i]
+		var id = data["id"]; var target_cell = data["cell"]; var cab_node = data["cab_node"]
+
+		ItemManager.mark_item_as_found(id)
+
+		var target_pos = target_cell.global_position
+		var target_rot = target_cell.get_meta("rot_deg", 0)
+		var target_shape = target_cell.get_meta("current_shape")
+
+		# Р“РµРЅРµСЂРёСЂСѓРµРј РїРѕР»РЅРѕС†РµРЅРЅС‹Р№ РїР°Р·Р·Р» С‡РµСЂРµР· СЂСЋРєР·Р°Рє
+		var fly_icon = backpack_widget.create_standalone_puzzle_visual(id, target_shape, target_rot)
+		fly_icon.z_index = 100
+		fly_icon.modulate.a = 0.0
+		$UILayer.add_child(fly_icon)
+
+		var start_tw = create_tween().bind_node(self)
+		start_tw.tween_interval(i * 0.15)
+		start_tw.tween_callback(func():
+			var start_pos = get_viewport().get_visible_rect().size / 2.0
+			if cab_node:
+				if cab_node.has_method("hide_item"): cab_node.hide_item()
+				else: cab_node.hide()
+				if cam: start_pos = cam.unproject_position(cab_node.global_position)
+
+			fly_icon.global_position = start_pos - (fly_icon.size / 2.0)
+			fly_icon.scale = Vector2(0.2, 0.2) # Р’С‹Р»РµС‚Р°РµС‚ РјР°Р»РµРЅСЊРєРёРј РёР· С€РєР°С„Р°
+			fly_icon.modulate.a = 1.0
+
+			var anim_tw = create_tween().bind_node(self).set_parallel(true).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
+			anim_tw.tween_property(fly_icon, "global_position", target_pos, 0.4)
+			anim_tw.tween_property(fly_icon, "scale", Vector2.ONE, 0.4)
+			# Р’СЂР°С‰РµРЅРёРµ РЅРµ РЅСѓР¶РЅРѕ, С‚Р°Рє РєР°Рє С„РѕСЂРјР° РїР°Р·Р·Р»Р° СѓР¶Рµ РїРѕРІРµСЂРЅСѓС‚Р° РїСЂР°РІРёР»СЊРЅРѕ РІРЅСѓС‚СЂРё РєРѕРЅС‚РµР№РЅРµСЂР°
+
+			anim_tw.chain().tween_callback(func():
+				fly_icon.queue_free()
+				if is_instance_valid(target_cell):
+					# РЎРЅРёРјР°РµРј С„Р»Р°Рі РѕР¶РёРґР°РЅРёСЏ
+					target_cell.set_meta("hide_bg_until_land", false)
+
+					if target_cell.has_node("ItemIcon"):
+						target_cell.get_node("ItemIcon").show()
+
+					# Р’РђР–РќРћ: Р’С‹Р·С‹РІР°РµРј РѕР±РЅРѕРІР»РµРЅРёРµ РІРёР·СѓР°Р»Р° СЂСЋРєР·Р°РєР°, С‡С‚РѕР±С‹ РІРµСЂРЅСѓС‚СЊ С„РѕРЅ
+					if backpack_widget and backpack_widget.has_method("_update_grid_visuals"):
+						backpack_widget._update_grid_visuals()
+			)
+		)
+	var added_cinematics = cinematic_queue - queue_before
+	if added_cinematics > 0:
+		fast_cinematic_count += added_cinematics
+
+	if autofill_button:
+		var tw = create_tween().bind_node(self).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+		tw.tween_property(autofill_button, "modulate:a", 0.0, 0.3)
+		tw.tween_callback(autofill_button.hide)
+		
+	get_tree().create_timer(total_anim_time).timeout.connect(func():
+		is_autofill_animating = false
+		autofill_finished.emit()
+	)
+
+func _on_item_pressed(id: int, tex: String, node: Node3D):
+	if is_cinematic_playing: return
+	potential_drag_id = id; potential_drag_tex = tex; potential_drag_node = node
+	drag_start_pos = get_viewport().get_mouse_position()
+
+func _input(event):
+	if is_cinematic_playing: return 
+	
+	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and not event.pressed:
+		if potential_drag_id != -1:
+			if ItemManager.is_dragging_item: _perform_drop()
+			else: _reset_drag_instant() 
+
+	if event is InputEventMouseMotion and potential_drag_id != -1:
+		if not ItemManager.is_dragging_item:
+			var diff = event.position - drag_start_pos
+			if diff.length() > DRAG_THRESHOLD:
+				if abs(diff.y) > abs(diff.x): _start_drag() 
+				else: _reset_drag_instant() 
+		else:
+			if backpack_widget and backpack_widget.has_method("update_external_drag_preview"):
+				backpack_widget.update_external_drag_preview(event.position)
+
+func _start_drag():
+	ItemManager.is_dragging_item = true
+	current_drag_node = potential_drag_node
+	if cabinet and cabinet.has_method("focus_item_face_to_camera") and current_drag_node and not is_cinematic_playing:
+		cabinet.focus_item_face_to_camera(current_drag_node, 0.35)
+	if current_drag_node and current_drag_node.has_method("hide_item"): current_drag_node.hide_item()
+	if drag_preview: drag_preview.hide()
+	if backpack_widget and backpack_widget.has_method("show_external_drag_preview"):
+		var shape_to_draw: Array
+		if current_drag_node and current_drag_node.has_meta("puzzle_shape"):
+			shape_to_draw = current_drag_node.get_meta("puzzle_shape")
+		else:
+			shape_to_draw = ItemManager.items_db[potential_drag_id].get("shape", [Vector2.ZERO])
+		backpack_widget.show_external_drag_preview(
+			potential_drag_id,
+			get_viewport().get_mouse_position(),
+			shape_to_draw
+		)
+
+func _perform_drop():
+	var mouse_pos = get_viewport().get_mouse_position()
+	var dropped_successfully = false
+
+	if backpack_widget:
+		var forgiving_drop_zone = backpack_widget.get_global_rect().grow(200.0)
+		if forgiving_drop_zone.has_point(mouse_pos):
+			if backpack_widget.has_method("try_add_item"):
+				dropped_successfully = backpack_widget.try_add_item(potential_drag_id, mouse_pos, potential_drag_node)
+
+	if dropped_successfully:
+		current_drag_node = null
+		_reset_drag_instant()
+	else:
+		_fly_back_and_cancel()
+
+func _fly_back_and_cancel():
+	if autofill_cab_tween and autofill_cab_tween.is_running(): autofill_cab_tween.kill()
+	if backpack_widget and backpack_widget.has_method("hide_external_drag_preview"): backpack_widget.hide_external_drag_preview()
+	var node_to_return = current_drag_node
+	if node_to_return and is_instance_valid(node_to_return):
+		var tex_path = potential_drag_tex
+		var fly_icon = TextureRect.new()
+		if potential_drag_id != -1 and ItemManager.items_db.has(potential_drag_id):
+			fly_icon.texture = ItemManager.items_db[potential_drag_id].get("texture_res")
+		if fly_icon.texture == null:
+			fly_icon.texture = load(tex_path)
+		fly_icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		fly_icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+		fly_icon.size = fly_icon.texture.get_size() if fly_icon.texture else Vector2(100, 100)
+		fly_icon.pivot_offset = fly_icon.size / 2.0
+		fly_icon.global_position = get_viewport().get_mouse_position() - fly_icon.pivot_offset
+		fly_icon.z_index = 100
+		$UILayer.add_child(fly_icon)
+
+		if drag_preview: drag_preview.hide()
+
+		const FOCUS_DURATION := 0.2
+		if cabinet and cabinet.has_method("focus_item_face_to_camera") and node_to_return and not is_cinematic_playing:
+			cabinet.focus_item_face_to_camera(node_to_return, FOCUS_DURATION, true)
+
+		var local_fly_tween = create_tween().bind_node(self).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+		local_fly_tween.tween_interval(FOCUS_DURATION)
+		local_fly_tween.tween_callback(_run_fly_icon_return_after_focus.bind(fly_icon, node_to_return))
+	current_drag_node = null
+	potential_drag_id = -1; potential_drag_node = null; ItemManager.is_dragging_item = false
+
+func _reset_drag_instant():
+	potential_drag_id = -1; potential_drag_node = null; ItemManager.is_dragging_item = false; _hide_preview_only()
+
+func _hide_preview_only():
+	if backpack_widget and backpack_widget.has_method("hide_external_drag_preview"): backpack_widget.hide_external_drag_preview()
+	if drag_preview: drag_preview.hide(); drag_preview.texture = null
+	if current_drag_node and current_drag_node.has_method("show_item"): current_drag_node.show_item()
+	current_drag_node = null
+
+func _on_start_pressed():
+	start_button.hide()
+	ItemManager.generate_new_order()
+	if order_popup.has_method("fill_order_icons"): order_popup.fill_order_icons()
+	is_game_started = false; time_left = total_time
+	
+	order_popup.position.y = env_intro_start_y; letter.position.y = let_intro_start_y; letter.scale.y = let_intro_start_scale_y
+	var tween = create_tween().bind_node(self).set_parallel(true)
+	tween.tween_property(order_popup, "position:y", env_intro_end_y, env_intro_duration).set_trans(env_intro_trans).set_ease(env_intro_ease)
+	tween.tween_property(env_back, "modulate:a", 1.0, env_intro_fade); tween.tween_property(env_front, "modulate:a", 1.0, env_intro_fade)
+	tween.tween_property(letter, "position:y", let_intro_end_y, let_intro_duration).set_trans(let_intro_trans).set_ease(let_intro_ease).set_delay(let_intro_delay)
+	tween.tween_property(letter, "scale:y", let_intro_end_scale_y, let_intro_duration).set_trans(let_intro_trans).set_ease(let_outro_ease).set_delay(let_intro_delay)
+	tween.tween_property(letter, "modulate:a", 1.0, let_intro_fade).set_delay(let_intro_delay)
+	
+	await get_tree().create_timer(let_intro_delay + let_intro_duration).timeout
+	if !is_game_started: ready_button.show(); create_tween().bind_node(self).tween_property(ready_button, "modulate:a", 1.0, 0.2); is_timer_active = true
+
+func _on_ready_pressed():
+	if is_game_started: return
+	is_timer_active = false; start_game_flow()
+
+func _on_timer_timeout():
+	if is_game_started: return
+	is_timer_active = false; start_game_flow()
+
+func start_game_flow():
+	is_game_started = true; ready_button.disabled = true
+	if cabinet: cabinet.build_cabinet_tornado()
+	var outro = create_tween().bind_node(self).set_parallel(true)
+	outro.tween_property(order_popup, "position:y", env_outro_end_y, env_outro_duration).set_trans(env_outro_trans).set_ease(env_outro_ease)
+	outro.tween_property(env_back, "modulate:a", 0.0, env_outro_fade); outro.tween_property(env_front, "modulate:a", 0.0, env_outro_fade)
+	outro.tween_property(letter, "position:y", let_outro_end_y, let_outro_duration).set_trans(let_outro_trans).set_ease(let_outro_ease).set_delay(let_outro_delay)
+	outro.tween_property(letter, "scale:y", let_outro_end_scale_y, let_outro_duration).set_trans(let_outro_trans).set_ease(let_outro_ease).set_delay(let_outro_delay)
+	outro.tween_property(letter, "modulate:a", 0.0, let_outro_fade).set_delay(let_outro_delay)
+	outro.tween_property(ready_button, "modulate:a", 0.0, let_outro_fade)
+	
+	outro.chain().tween_callback(ready_button.hide)
+	outro.chain().tween_callback(func():
+		if side_widget: side_widget.start_appear_animation()
+		if backpack_widget: backpack_widget.start_appear_animation()
+		if attempts_widget: attempts_widget.start_appear_animation()
+		if autofill_button: autofill_button.modulate.a = 1.0; autofill_button.show()
+	)
+
+func _run_fly_icon_return_after_focus(fly_icon: TextureRect, drag_node: Node3D) -> void:
+	var cam = get_viewport().get_camera_3d()
+	var target_pos = drag_start_pos - fly_icon.pivot_offset
+
+	if cam and drag_node and is_instance_valid(drag_node):
+		# РџР РћР’Р•Р РљРђ РќРђ РџРћР—РР¦РР® Р—Рђ РљРђРњР•Р РћР™
+		if cam.is_position_behind(drag_node.global_position):
+			fly_icon.queue_free()
+			if drag_node.has_method("show_item"): drag_node.show_item()
+			else: drag_node.show()
+			return
+
+		target_pos = cam.unproject_position(drag_node.global_position) - fly_icon.pivot_offset
+
+	var local_inner_tween = create_tween().bind_node(self).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+	local_inner_tween.tween_property(fly_icon, "global_position", target_pos, 0.3)
+	local_inner_tween.tween_callback(func():
+		fly_icon.queue_free()
+		if drag_node and is_instance_valid(drag_node):
+			if drag_node.has_method("show_item"): drag_node.show_item()
+			else: drag_node.show()
+	)
+
+func fly_back_to_cabinet(item_id: int, start_pos: Vector2, drag_node: Node3D, skip_unmark: bool = false):
+	const FOCUS_DURATION := 0.2
+	if item_id == -1: ItemManager.is_dragging_item = false; return
+
+	# РџСЂРѕРїСѓСЃРєР°РµРј СЃРЅСЏС‚РёРµ С„Р»Р°РіР°, РµСЃР»Рё СЌС‚Рѕ РґРµР»Р°РµС‚ Autofill (РѕС‡РёСЃС‚РєР° РјСѓСЃРѕСЂР°)
+	if not skip_unmark:
+		ItemManager.unmark_item_as_found(item_id)
+
+	if autofill_cab_tween and autofill_cab_tween.is_running(): autofill_cab_tween.kill()
+	ItemManager.is_dragging_item = false
+	if not ItemManager.items_db.has(item_id):
+		if drag_node and is_instance_valid(drag_node):
+			if drag_node.has_method("show_item"): drag_node.show_item()
+			else: drag_node.show()
+		return
+	var db_entry = ItemManager.items_db[item_id]
+	var fly_icon = TextureRect.new()
+	fly_icon.texture = db_entry.get("texture_res")
+	if fly_icon.texture == null and db_entry.get("texture", "") != "":
+		fly_icon.texture = load(db_entry["texture"])
+	fly_icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	fly_icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	fly_icon.size = fly_icon.texture.get_size() if fly_icon.texture else Vector2(100, 100)
+	fly_icon.pivot_offset = fly_icon.size / 2.0
+	fly_icon.global_position = start_pos - fly_icon.pivot_offset
+	fly_icon.z_index = 100
+	$UILayer.add_child(fly_icon)
+
+	if drag_preview: drag_preview.hide()
+
+	if cabinet and cabinet.has_method("focus_item_face_to_camera") and drag_node and not is_cinematic_playing:
+		cabinet.focus_item_face_to_camera(drag_node, FOCUS_DURATION, true)
+
+	var local_fly_tween = create_tween().bind_node(self).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+	local_fly_tween.tween_interval(FOCUS_DURATION)
+	local_fly_tween.tween_callback(_run_fly_icon_return_after_focus.bind(fly_icon, drag_node))
+
+
+
+============================================================
+SCRIPT: order_pop_up.gd
+PATH: res://Scenes/order_pop_up.gd
+THESIS: Попап письма: пересбор карточек заказа из ItemManager.
+-------------------- FULL SOURCE ---------------------------
+extends Control
+
+# РЎСЃС‹Р»РєР° РЅР° СЃС†РµРЅСѓ РєР°СЂС‚РѕС‡РєРё (РґРѕР»Р¶РЅР° Р±С‹С‚СЊ РЅР°Р·РЅР°С‡РµРЅР° РІ РРЅСЃРїРµРєС‚РѕСЂРµ Godot!)
+@export var item_card_scene: PackedScene
+
+# РЎСЃС‹Р»РєР° РЅР° СѓР·РµР», РєСѓРґР° Р±СѓРґСѓС‚ СЃРєР»Р°РґС‹РІР°С‚СЊСЃСЏ РёРєРѕРЅРєРё
+@onready var items_grid = $LetterContainer/LetterPaper/Items
+
+func fill_order_icons():
+	# 1. РџР РђР’РР›Р¬РќРђРЇ РћР§РРЎРўРљРђ: РЎРЅР°С‡Р°Р»Р° РѕС‚СЂС‹РІР°РµРј РѕС‚ РґРµСЂРµРІР°, РїРѕС‚РѕРј СѓРґР°Р»СЏРµРј
+	for child in items_grid.get_children():
+		items_grid.remove_child(child)
+		child.queue_free()
+	
+	# 2. РЎРѕР·РґР°РµРј РЅРѕРІС‹Рµ РєР°СЂС‚РѕС‡РєРё РЅР° РѕСЃРЅРѕРІРµ С‚РµРєСѓС‰РµРіРѕ Р·Р°РєР°Р·Р°
+	for order_data in ItemManager.current_order:
+		if item_card_scene:
+			var card = item_card_scene.instantiate()
+			items_grid.add_child(card)
+			
+			var tex_path = ItemManager.items_db[order_data["id"]]["texture"]
+			card.set_item(tex_path)
+
+
+============================================================
+SCRIPT: out_of_attempts_popup.gd
+PATH: res://Scenes/out_of_attempts_popup.gd
+THESIS: Попап нехватки попыток: оверлей, контент, кнопки, твины открытия/закрытия (версия в корне/дубликат пути — см. PATH).
+-------------------- FULL SOURCE ---------------------------
+extends Control
+
+signal popup_closed(action: String)
+
+@onready var overlay = $Overlay
+@onready var content_box = $ContentBox
+@onready var btn_close = $ContentBox/BtnClose
+@onready var btn_autofill = $ContentBox/BtnAutofill
+
+# РЎСЃС‹Р»РєРё РЅР° РІРёР·СѓР°Р»СЊРЅС‹Рµ СЌР»РµРјРµРЅС‚С‹ РґР»СЏ Р°РІС‚Рѕ-Р·Р°РіСЂСѓР·РєРё
+@onready var paper_bg = $ContentBox/PaperBackground
+@onready var illustration = $ContentBox/Illustration
+@onready var title_label = $ContentBox/TitleLabel
+@onready var paragraph_label = $ContentBox/ParagraphLabel
+@onready var left_deco = $ContentBox/LeftDeco
+@onready var right_deco = $ContentBox/RightDeco
+@onready var icon_video = get_node_or_null("ContentBox/BtnAutofill/HBoxContainer/Icon")
+
+var _attempts_widget_ref: Control = null
+var _original_attempts_z_index: int = 0
 
 func _ready() -> void:
 	hide()
+	_setup_visuals()
 
-	if not ItemManager.attempts_updated.is_connected(_on_attempts_updated):
-		ItemManager.attempts_updated.connect(_on_attempts_updated)
+	overlay.color.a = 0.0
+	if content_box:
+		content_box.scale = Vector2(0.95, 0.95)
+		content_box.modulate.a = 0.0
+	btn_close.modulate.a = 0.0
+	btn_autofill.modulate.a = 0.0
 
-	count_label.text = str(ItemManager.current_attempts)
+	if btn_close: btn_close.pressed.connect(_on_close_pressed)
+	if btn_autofill: btn_autofill.pressed.connect(_on_autofill_pressed)
 
-	# РЎРѕР·РґР°РµРј СѓРЅРёРєР°Р»СЊРЅС‹Р№ РјР°С‚РµСЂРёР°Р» СЃ С€РµР№РґРµСЂРѕРј Р±Р»РёРєР°
+func _setup_visuals() -> void:
+	# === РќРђРЎРўР РћР™РљРђ РўР•РљРЎРўРћР’ ===
+	if title_label:
+		title_label.text = "Out of attempts"
+	if paragraph_label:
+		paragraph_label.text = "Watch an AD and we'll place\nall the right items. Your cats\nwill be happy!"
+
+	# === Р—РђР“Р РЈР—РљРђ РљРђР РўРРќРћРљ ===
+	# Р’РќРРњРђРќРР•: Р—Р°РјРµРЅРё РЅР°Р·РІР°РЅРёСЏ С„Р°Р№Р»РѕРІ (paper.png Рё С‚.Рґ.) РЅР° СЂРµР°Р»СЊРЅС‹Рµ РёРјРµРЅР° РёР· С‚РІРѕРµР№ РїР°РїРєРё!
+	var load_tex = func(node: TextureRect, file_name: String):
+		if node and ResourceLoader.exists("res://Assets/2D/" + file_name):
+			node.texture = load("res://Assets/2D/" + file_name)
+
+	var load_btn = func(btn: TextureButton, file_name: String):
+		if btn and ResourceLoader.exists("res://Assets/2D/" + file_name):
+			btn.texture_normal = load("res://Assets/2D/" + file_name)
+
+	load_tex.call(paper_bg, "paper_bg.png") # Р¤РѕРЅ РїРёСЃСЊРјР°
+	load_tex.call(illustration, "cats_art.png") # РљР°СЂС‚РёРЅРєР° СЃ РєРѕС‚Р°РјРё
+	load_tex.call(left_deco, "deco_left.png") # РЈР·РѕСЂ СЃР»РµРІР°
+	load_tex.call(right_deco, "deco_right.png") # РЈР·РѕСЂ СЃРїСЂР°РІР°
+	load_tex.call(icon_video, "icon_video.png") # РРєРѕРЅРєР° РІРёРґРµРѕ РЅР° РєРЅРѕРїРєРµ
+
+	load_btn.call(btn_close, "btn_close.png") # РљСЂРµСЃС‚РёРє
+	load_btn.call(btn_autofill, "btn_autofill.png") # РћСЂР°РЅР¶РµРІР°СЏ РєРЅРѕРїРєР°
+
+func open_popup(attempts_widget: Control = null) -> void:
+	show()
+	z_index = 300
+	if attempts_widget and is_instance_valid(attempts_widget):
+		_attempts_widget_ref = attempts_widget
+		_original_attempts_z_index = attempts_widget.z_index
+		attempts_widget.z_index = 301
+
+	var tw = create_tween().bind_node(self)
+	tw.parallel().tween_property(overlay, "color:a", 0.85, 0.35).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+	if content_box:
+		tw.parallel().tween_property(content_box, "scale", Vector2.ONE, 0.35).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+		tw.parallel().tween_property(content_box, "modulate:a", 1.0, 0.35).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+
+	tw.chain().tween_property(btn_close, "modulate:a", 1.0, 0.2).set_trans(Tween.TRANS_SINE)
+	tw.parallel().tween_property(btn_autofill, "modulate:a", 1.0, 0.2).set_trans(Tween.TRANS_SINE)
+
+func _close_popup(action: String) -> void:
+	btn_close.disabled = true
+	btn_autofill.disabled = true
+
+	var tw = create_tween().bind_node(self)
+	tw.parallel().tween_property(btn_close, "modulate:a", 0.0, 0.15).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN)
+	tw.parallel().tween_property(btn_autofill, "modulate:a", 0.0, 0.15).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN)
+
+	if content_box:
+		tw.chain().tween_property(content_box, "scale", Vector2(0.95, 0.95), 0.25).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_IN)
+		tw.parallel().tween_property(content_box, "modulate:a", 0.0, 0.25).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN)
+	if overlay:
+		tw.parallel().tween_property(overlay, "color:a", 0.0, 0.25).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN)
+
+	tw.chain().tween_callback(func():
+		if _attempts_widget_ref and is_instance_valid(_attempts_widget_ref):
+			_attempts_widget_ref.z_index = _original_attempts_z_index
+
+		hide()
+		popup_closed.emit(action)
+		queue_free()
+	)
+
+func _on_close_pressed() -> void:
+	_close_popup("continue")
+
+func _on_autofill_pressed() -> void:
+	_close_popup("autofill")
+
+
+
+============================================================
+SCRIPT: perfect_popup.gd
+PATH: res://Scenes/perfect_popup.gd
+THESIS: Экран Perfect Clear: оверлей, текстура, glint-шейдер и твины.
+-------------------- FULL SOURCE ---------------------------
+extends Control
+
+var overlay: ColorRect
+var popup_img: TextureRect
+var _shader_mat: ShaderMaterial
+
+func _ready() -> void:
+	set_anchors_preset(Control.PRESET_FULL_RECT)
+
+	overlay = ColorRect.new()
+	overlay.color = Color(0, 0, 0, 0.0)
+	overlay.set_anchors_preset(Control.PRESET_FULL_RECT)
+	overlay.size = get_viewport_rect().size
+	add_child(overlay)
+
+	popup_img = TextureRect.new()
+	popup_img.texture = load("res://Assets/UI/Perfect_Memory.png")
+	popup_img.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	popup_img.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	popup_img.custom_minimum_size = Vector2(988, 982)
+	popup_img.size = Vector2(988, 982)
+	popup_img.pivot_offset = popup_img.size / 2.0
+	popup_img.scale = Vector2.ZERO
+	add_child(popup_img)
+
 	_shader_mat = ShaderMaterial.new()
 	_shader_mat.shader = load("res://Shaders/glint.gdshader")
-	_shader_mat.set_shader_parameter("progress", -0.1) # РџСЂСЏС‡РµРј Р±Р»РёРє Р·Р° РїСЂРµРґРµР»С‹
-	heart_icon.material = _shader_mat
+	_shader_mat.set_shader_parameter("progress", 0.0)
+	popup_img.material = _shader_mat
 
-func start_appear_animation() -> void:
+	hide()
+
+func play_animation(on_complete: Callable) -> void:
+	show()
+	var screen_size: Vector2 = get_viewport_rect().size
+	overlay.size = screen_size
+	popup_img.position = (screen_size / 2.0) - popup_img.pivot_offset
+
+	var tw := create_tween().set_parallel(true)
+	tw.tween_property(overlay, "color:a", 0.7, 0.4)
+	tw.tween_property(popup_img, "scale", Vector2(1.0, 1.0), 0.6).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	tw.tween_method(
+		func(v: float): _shader_mat.set_shader_parameter("progress", v),
+		0.0, 1.0, 0.6
+	).set_trans(Tween.TRANS_SINE).set_delay(0.35)
+
+	var start_y: float = popup_img.position.y
+	var amp: float = 15.0
+	var float_tw := create_tween().set_loops()
+	float_tw.tween_property(popup_img, "position:y", start_y - amp, 1.5).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT).set_delay(0.6)
+	float_tw.tween_property(popup_img, "position:y", start_y + amp, 3.0).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
+	float_tw.tween_property(popup_img, "position:y", start_y, 1.5).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
+
+	get_tree().create_timer(2.5).timeout.connect(func():
+		if float_tw.is_valid():
+			float_tw.kill()
+		var outro := create_tween().set_parallel(true)
+		outro.tween_property(overlay, "color:a", 0.0, 0.2)
+		outro.tween_property(popup_img, "scale", Vector2.ZERO, 0.25).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_IN)
+		outro.chain().tween_callback(func():
+			hide()
+			on_complete.call()
+			queue_free()
+		)
+	)
+
+
+
+============================================================
+SCRIPT: side_widget.gd
+PATH: res://Scenes/side_widget.gd
+THESIS: Боковой список заказа: появление и синхронизация с найденными предметами.
+-------------------- FULL SOURCE ---------------------------
+extends Control
+
+@export var entry_scene: PackedScene = preload("res://Scenes/SideWidgetEntry.tscn")
+
+@onready var items_container = $ItemsContainer
+@onready var small_envelope = $SmallEnvelope
+@onready var combo_widget = $ComboWidget
+
+const ITEM_SIZE = 120.0
+const SPACING = 30.0
+
+func _ready():
+	hide()
+	if !ItemManager.item_found.is_connected(_on_item_found):
+		ItemManager.item_found.connect(_on_item_found)
+
+func start_appear_animation():
+	# РџР РђР’РР›Р¬РќРђРЇ РћР§РРЎРўРљРђ: РѕС‚СЂС‹РІР°РµРј РѕС‚ РёРЅС‚РµСЂС„РµР№СЃР° РїРµСЂРµРґ СѓРґР°Р»РµРЅРёРµРј
+	for c in items_container.get_children():
+		items_container.remove_child(c)
+		c.queue_free()
+	
 	show()
 	modulate.a = 0.0
-	var tw = create_tween().bind_node(self).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
-	tw.tween_property(self, "modulate:a", 1.0, 0.4)
+	create_tween().tween_property(self, "modulate:a", 1.0, 0.3)
+	
+	for i in range(ItemManager.current_order.size()):
+		var item_data = ItemManager.current_order[i]
+		var entry = entry_scene.instantiate()
+		items_container.add_child(entry)
+		
+		entry.setup(item_data["id"], ItemManager.items_db[item_data["id"]]["texture"])
+		
+		var is_already_found = item_data["found"]
+		entry.set_meta("is_flipped", is_already_found)
+		if is_already_found and entry.has_method("flip_to_front"):
+			entry.flip_to_front()
+		
+		var target_pos = Vector2(0, i * (ITEM_SIZE + SPACING))
+		var diff = small_envelope.position - items_container.position
+		var start_pos = diff + Vector2((small_envelope.size.x - ITEM_SIZE)/2, (small_envelope.size.y - ITEM_SIZE)/2)
+		
+		entry.position = start_pos
+		entry.scale = Vector2(0.1, 0.1)
+		
+		var tw = create_tween().set_parallel(true).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+		tw.tween_property(entry, "position", target_pos, 0.6).set_delay(i * 0.1)
+		tw.tween_property(entry, "scale", Vector2.ONE, 0.6).set_delay(i * 0.1)
 
-func _on_attempts_updated(new_val: int, is_correct: bool) -> void:
-	# Р—Р°С‰РёС‚Р° РѕС‚ Р°РЅРёРјР°С†РёРё РїСЂРё СЂРµСЃС‚Р°СЂС‚Рµ СѓСЂРѕРІРЅСЏ
-	if new_val == ItemManager.max_attempts:
-		count_label.text = str(new_val)
-		return
+func _on_item_found(id: int):
+	for entry in items_container.get_children():
+		if int(entry.item_id) == int(id) and not entry.get_meta("is_flipped", false):
+			entry.flip_to_front()
+			entry.set_meta("is_flipped", true)
 
-	if pulse_tween and pulse_tween.is_valid():
-		pulse_tween.kill()
+			if not ItemManager.combo_failed:
+				if combo_widget and combo_widget.has_method("show_success"):
+					var total: int = ItemManager.current_order.size()
+					combo_widget.show_success(ItemManager.combo_score, total)
+			break
 
-	pulse_tween = create_tween().bind_node(self)
 
-	# Р•СЃР»Рё РїСЂРµРґРјРµС‚ РІРµСЂРЅС‹Р№ - Р¶РґРµРј 0.35СЃ, РїРѕРєР° РїРµСЂРµРІРµСЂРЅРµС‚СЃСЏ РєР°СЂС‚РѕС‡РєР° РІ SideWidget
-	if is_correct:
-		pulse_tween.tween_interval(0.35)
+============================================================
+SCRIPT: side_widget_entry.gd
+PATH: res://Scenes/side_widget_entry.gd
+THESIS: Строка заказа: flip-карточка back/front.
+-------------------- FULL SOURCE ---------------------------
+extends Control
 
-	# РџРѕРґРіРѕС‚РѕРІРєР° РїРµСЂРµРґ РїСѓР»СЊСЃРѕРј
-	pulse_tween.tween_callback(func():
-		_shader_mat.set_shader_parameter("progress", 0.0)
+@onready var back = $Back
+@onready var front = $Front
+
+var current_tw: Tween
+var item_id: int = -1
+
+func setup(id: int, texture_path: String):
+	item_id = id
+	front.texture = load(texture_path)
+	front.scale.x = 0 # РЈР±РµР¶РґР°РµРјСЃСЏ, С‡С‚Рѕ Р»РёС†Рѕ СЃРєСЂС‹С‚Рѕ
+	back.scale.x = 1
+	back.show()
+
+# Р¤СѓРЅРєС†РёСЏ РєСЂР°СЃРёРІРѕРіРѕ РїРµСЂРµРІРѕСЂРѕС‚Р° РєР°СЂС‚РѕС‡РєРё
+func flip_to_front():
+	if current_tw and current_tw.is_running():
+		current_tw.kill()
+
+	current_tw = create_tween().bind_node(self).set_ease(Tween.EASE_IN_OUT).set_trans(Tween.TRANS_QUAD)
+
+	current_tw.tween_property(back, "scale:x", 0.0, 0.15)
+	current_tw.tween_callback(back.hide)
+	current_tw.tween_callback(front.show)
+	current_tw.tween_property(front, "scale:x", 1.0, 0.15)
+
+func flip_to_back():
+	if current_tw and current_tw.is_running():
+		current_tw.kill()
+
+	current_tw = create_tween().bind_node(self).set_ease(Tween.EASE_IN_OUT).set_trans(Tween.TRANS_QUAD)
+
+	current_tw.tween_property(front, "scale:x", 0.0, 0.15)
+	current_tw.tween_callback(func():
+		front.hide()
+		back.show()
 	)
-
-	# Р¤РђР—Рђ 1: "Р’Р·РґРѕС…" (РЅР°РїРѕР»РЅРµРЅРёРµ СЃРµСЂРґС†Р°) + РџСЂРѕС…РѕРґ Р±Р»РёРєР°
-	var phase1 = pulse_tween.parallel()
-	phase1.tween_property(heart_icon, "scale", Vector2(1.35, 1.35), 0.25).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
-	phase1.tween_method(
-		func(v: float): _shader_mat.set_shader_parameter("progress", v),
-		0.0, 1.0, 0.25
-	).set_trans(Tween.TRANS_LINEAR)
-
-	# Р¤РђР—Рђ 2: РџРёРє РїСѓР»СЊСЃР° (РјРёРєСЂРѕ-Р·Р°РІРёСЃР°РЅРёРµ Рё РёР·РјРµРЅРµРЅРёРµ С†РёС„СЂС‹)
-	pulse_tween.chain().tween_callback(func():
-		count_label.text = str(new_val)
-	)
-	pulse_tween.tween_property(heart_icon, "scale", Vector2(1.45, 1.45), 0.05).set_trans(Tween.TRANS_LINEAR)
-
-	# Р¤РђР—Рђ 3: РЈРїСЂСѓРіРёР№ РІРѕР·РІСЂР°С‚ (Elastic snap)
-	pulse_tween.chain().tween_property(heart_icon, "scale", Vector2.ONE, 0.5).set_trans(Tween.TRANS_ELASTIC).set_ease(Tween.EASE_OUT)
-
-	# РџСЂСЏС‡РµРј Р±Р»РёРє РІ РєРѕРЅС†Рµ, С‡С‚РѕР±С‹ РЅРµ РѕСЃС‚Р°РІР»СЏС‚СЊ Р°СЂС‚РµС„Р°РєС‚РѕРІ
-	pulse_tween.parallel().tween_callback(func():
-		_shader_mat.set_shader_parameter("progress", -0.1)
-	).set_delay(0.1)
-
+	current_tw.tween_property(back, "scale:x", 1.0, 0.15)
 
 

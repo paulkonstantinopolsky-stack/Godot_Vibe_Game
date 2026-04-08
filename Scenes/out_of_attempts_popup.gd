@@ -24,12 +24,25 @@ func _ready() -> void:
 	_setup_visuals()
 
 	overlay.color.a = 0.0
-	content_box.scale = Vector2(0.5, 0.0)
+	if content_box:
+		content_box.scale = Vector2(0.95, 0.95)
+		content_box.modulate.a = 0.0
 	btn_close.modulate.a = 0.0
 	btn_autofill.modulate.a = 0.0
 
 	if btn_close: btn_close.pressed.connect(_on_close_pressed)
 	if btn_autofill: btn_autofill.pressed.connect(_on_autofill_pressed)
+
+	# --- ФИКС ПЕРЕХВАТА КЛИКОВ ---
+	# Делаем контейнер, текст и иконку "прозрачными" для мыши,
+	# чтобы клик гарантированно долетал до самой кнопки BtnAutofill
+	if btn_autofill:
+		for child in btn_autofill.get_children():
+			if child is Control:
+				child.mouse_filter = Control.MOUSE_FILTER_IGNORE
+				for subchild in child.get_children():
+					if subchild is Control:
+						subchild.mouse_filter = Control.MOUSE_FILTER_IGNORE
 
 func _setup_visuals() -> void:
 	# === НАСТРОЙКА ТЕКСТОВ ===
@@ -67,7 +80,9 @@ func open_popup(attempts_widget: Control = null) -> void:
 
 	var tw = create_tween().bind_node(self)
 	tw.parallel().tween_property(overlay, "color:a", 0.85, 0.35).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
-	tw.parallel().tween_property(content_box, "scale", Vector2.ONE, 0.45).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	if content_box:
+		tw.parallel().tween_property(content_box, "scale", Vector2.ONE, 0.35).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+		tw.parallel().tween_property(content_box, "modulate:a", 1.0, 0.35).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
 
 	tw.chain().tween_property(btn_close, "modulate:a", 1.0, 0.2).set_trans(Tween.TRANS_SINE)
 	tw.parallel().tween_property(btn_autofill, "modulate:a", 1.0, 0.2).set_trans(Tween.TRANS_SINE)
@@ -80,8 +95,11 @@ func _close_popup(action: String) -> void:
 	tw.parallel().tween_property(btn_close, "modulate:a", 0.0, 0.15).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN)
 	tw.parallel().tween_property(btn_autofill, "modulate:a", 0.0, 0.15).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN)
 
-	tw.chain().tween_property(content_box, "scale", Vector2(0.5, 0.0), 0.25).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_IN)
-	tw.parallel().tween_property(overlay, "color:a", 0.0, 0.25).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN)
+	if content_box:
+		tw.chain().tween_property(content_box, "scale", Vector2(0.95, 0.95), 0.25).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_IN)
+		tw.parallel().tween_property(content_box, "modulate:a", 0.0, 0.25).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN)
+	if overlay:
+		tw.parallel().tween_property(overlay, "color:a", 0.0, 0.25).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN)
 
 	tw.chain().tween_callback(func():
 		if _attempts_widget_ref and is_instance_valid(_attempts_widget_ref):

@@ -2,7 +2,6 @@
 
 [ext_resource type="Script" uid="uid://d0nwl5dfkm28x" path="res://Scenes/main_scene.gd" id="1_06phl"]
 [ext_resource type="PackedScene" uid="uid://8wt0ks3gelni" path="res://Scenes/Cabinet.tscn" id="1_cabinet"]
-[ext_resource type="Texture2D" uid="uid://c0enkvr76li6n" path="res://Assets/2D/BG_Gameplay.png" id="2_4xruw"]
 [ext_resource type="Texture2D" uid="uid://ykv7lx6q61kv" path="res://Assets/2D/Start_Button.png" id="2_4y1r4"]
 [ext_resource type="FontFile" uid="uid://crl2jbvqyt7jm" path="res://Fonts/Comfortaa-Bold.ttf" id="2_6bry8"]
 [ext_resource type="Texture2D" uid="uid://d2bablq68whcj" path="res://Assets/2D/BGG5.png" id="2_vndvl"]
@@ -60,20 +59,6 @@ let_outro_ease = 2
 [node name="Background3D" type="Sprite3D" parent="." unique_id=215064808]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 14.909956, -18.70093)
 texture = ExtResource("2_vndvl")
-
-[node name="BGLayer" type="CanvasLayer" parent="." unique_id=967386797]
-layer = -1
-
-[node name="BG_Gameplay" type="TextureRect" parent="BGLayer" unique_id=2135953049]
-visible = false
-anchors_preset = 15
-anchor_right = 1.0
-anchor_bottom = 1.0
-grow_horizontal = 2
-grow_vertical = 2
-texture = ExtResource("2_4xruw")
-expand_mode = 1
-stretch_mode = 6
 
 [node name="Cabinet" parent="." unique_id=801209297 instance=ExtResource("1_cabinet")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 2.3296428, -2.191621)

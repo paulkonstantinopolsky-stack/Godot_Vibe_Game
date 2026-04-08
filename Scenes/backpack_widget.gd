@@ -1447,10 +1447,10 @@ func start_order_completed_sequence() -> void:
 	closing_sequence_node.set_meta("MOUSE_FILTER_IGNORE", true)
 	get_parent().add_child(closing_sequence_node)
 
-	closing_sequence_node.size = backpack_bg.size
+	closing_sequence_node.set_deferred("size", backpack_bg.size)
 	closing_sequence_node.scale = backpack_bg.scale * seq_visual_scale_multiplier
 	var bg_center = backpack_bg.global_position + (backpack_bg.size * backpack_bg.scale / 2.0)
-	var seq_offset = (closing_sequence_node.size * closing_sequence_node.scale) / 2.0
+	var seq_offset = (backpack_bg.size * closing_sequence_node.scale) / 2.0
 	closing_sequence_node.global_position = bg_center - seq_offset + seq_visual_offset
 
 	var start_center = backpack_bg.global_position + (backpack_bg.size * backpack_bg.scale / 2.0)

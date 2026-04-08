@@ -32,6 +32,11 @@ func _on_attempts_updated(new_val: int, is_correct: bool) -> void:
 		count_label.text = str(new_val)
 		return
 
+	# Если 0 - просто меняем цифру и выходим (без блика и анимации)
+	if new_val == 0:
+		count_label.text = str(new_val)
+		return
+
 	if pulse_tween and pulse_tween.is_valid():
 		pulse_tween.kill()
 
