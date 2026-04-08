@@ -386,8 +386,8 @@ func _play_autofill_cascade_animation() -> void:
 func _apply_ideal_flight_step(v: float, start_center: Vector2, target_center: Vector2, start_scale: Vector2, target_scale: Vector2) -> void:
 	var cur_center = start_center
 	var cur_scale = start_scale
-	# Прыжок стал ниже (было -460)
-	var apex_center = target_center + Vector2(0, -320.0)
+	# Апекс прыжка (-480px)
+	var apex_center = target_center + Vector2(0, -480.0)
 
 	var cam_3d = get_tree().get_first_node_in_group("main_camera")
 	if is_instance_valid(cam_3d) and not cam_3d.has_meta("base_rot_x"):

@@ -5,6 +5,7 @@
 [ext_resource type="Texture2D" uid="uid://c0enkvr76li6n" path="res://Assets/2D/BG_Gameplay.png" id="2_4xruw"]
 [ext_resource type="Texture2D" uid="uid://ykv7lx6q61kv" path="res://Assets/2D/Start_Button.png" id="2_4y1r4"]
 [ext_resource type="FontFile" uid="uid://crl2jbvqyt7jm" path="res://Fonts/Comfortaa-Bold.ttf" id="2_6bry8"]
+[ext_resource type="Texture2D" uid="uid://d2bablq68whcj" path="res://Assets/2D/BGG5.png" id="2_vndvl"]
 [ext_resource type="Environment" uid="uid://cbntsyeky6pkj" path="res://my_env.tres" id="3_5p0eq"]
 [ext_resource type="Script" uid="uid://dut6a60a0h7i4" path="res://Scenes/order_pop_up.gd" id="3_ibde2"]
 [ext_resource type="PackedScene" uid="uid://q7m4xv1o6ted" path="res://item_card.tscn" id="4_0k7nw"]
@@ -56,8 +57,8 @@ let_outro_trans = 1
 let_outro_ease = 2
 
 [node name="Background3D" type="Sprite3D" parent="." unique_id=215064808]
-transform = Transform3D(3, 0, 0, 0, 3, 0, 0, 0, 3, 0, 7.8467712, -43.775124)
-texture = ExtResource("2_4xruw")
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 14.909956, -18.70093)
+texture = ExtResource("2_vndvl")
 
 [node name="BGLayer" type="CanvasLayer" parent="." unique_id=967386797]
 layer = -1

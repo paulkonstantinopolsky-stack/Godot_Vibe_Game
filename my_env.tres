@@ -14,7 +14,6 @@ sky = SubResource("Sky_8sucx")
 ambient_light_source = 2
 ambient_light_color = Color(1, 0.92944205, 0.5737576, 1)
 ambient_light_energy = 0.7
-tonemap_mode = 2
 ssao_enabled = true
 ssil_enabled = true
 glow_enabled = true
