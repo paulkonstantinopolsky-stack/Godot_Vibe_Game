@@ -29,3 +29,10 @@ func hide_item():
 func show_item():
 	if has_node("Sprite3D"):
 		$Sprite3D.show()
+
+func fade_out_magic() -> void:
+	if has_node("Sprite3D"):
+		var sprite = $Sprite3D
+		# Прозрачность Sprite3D в Godot 4 — через modulate.a (1 = видим, 0 = невидим)
+		var tw = create_tween().bind_node(self).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
+		tw.tween_property(sprite, "modulate:a", 0.0, 0.4)

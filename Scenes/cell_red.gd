@@ -79,3 +79,9 @@ func _setup_confetti_particles() -> void:
 	grad.add_point(0.66, Color(0.2, 0.5, 1.0))
 	grad.add_point(1.0, Color(1.0, 0.8, 0.2))
 	confetti.color_initial_ramp = grad
+
+func close_doors_magic() -> void:
+	if door_left and door_right:
+		var tw = create_tween().bind_node(self).set_parallel(true).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
+		tw.tween_property(door_left, "rotation_degrees:y", 0.0, 0.4)
+		tw.tween_property(door_right, "rotation_degrees:y", 0.0, 0.4)

@@ -864,6 +864,7 @@ func hide_external_drag_preview() -> void:
 # --- ОСТАЛЬНАЯ ЛОГИКА ---
 # ==========================================================
 func _input(event):
+	if is_order_completed: return
 	var mouse_pos = get_global_mouse_position()
 	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
 		if event.pressed:
@@ -1487,12 +1488,11 @@ func start_order_completed_sequence() -> void:
 	)
 
 func _on_packing_final_completed() -> void:
-	is_order_completed = false
-	if closing_sequence_node:
-		closing_sequence_node.queue_free()
-		closing_sequence_node = null
+	# УБРАЛИ queue_free() отсюда. Теперь рюкзак удалит main_scene после полета к коту!
 
 	_clear_entire_grid()
 
 	if get_tree().current_scene.has_method("_on_level_completed"):
 		get_tree().current_scene._on_level_completed()
+
+	is_order_completed = false

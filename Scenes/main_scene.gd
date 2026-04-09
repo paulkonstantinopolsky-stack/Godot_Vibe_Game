@@ -364,8 +364,10 @@ func _on_item_pressed(id: int, tex: String, node: Node3D):
 	drag_start_pos = get_viewport().get_mouse_position()
 
 func _input(event):
-	if is_cinematic_playing: return 
-	
+	if not is_game_started or is_cinematic_playing or is_autofill_animating:
+		return
+
+
 	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and not event.pressed:
 		if potential_drag_id != -1:
 			if ItemManager.is_dragging_item: _perform_drop()
@@ -559,3 +561,64 @@ func fly_back_to_cabinet(item_id: int, start_pos: Vector2, drag_node: Node3D, sk
 	var local_fly_tween = create_tween().bind_node(self).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
 	local_fly_tween.tween_interval(FOCUS_DURATION)
 	local_fly_tween.tween_callback(_run_fly_icon_return_after_focus.bind(fly_icon, drag_node))
+
+
+func _on_level_completed() -> void:
+	is_game_started = false # Блокируем логику игры
+	if cabinet:
+		# 1. Готовим шкаф
+		cabinet.prepare_for_courier()
+
+		# 2. Через 0.6с открываем проход
+		var tw = create_tween().bind_node(self)
+		tw.tween_interval(0.6)
+		tw.tween_callback(func():
+			cabinet.open_courier_passage(_on_courier_spawned)
+		)
+
+
+func _on_courier_spawned() -> void:
+	# 1. Спавним котика внутри шкафа
+	var cat = Sprite3D.new()
+	cat.texture = load("res://Assets/2D/cat_courier.png")
+	cat.pixel_size = 0.004
+	cat.billboard = BaseMaterial3D.BILLBOARD_FIXED_Y
+	cat.alpha_cut = SpriteBase3D.ALPHA_CUT_DISCARD
+	if cabinet:
+		cabinet.add_child(cat)
+		# Поднимаем котика на 0.8 метра вверх, чтобы он стоял в центре прохода
+		cat.global_position = cabinet.global_position + Vector3(0, 0.8, 0)
+		cat.scale = Vector3.ZERO
+
+	var tw = create_tween().bind_node(self).set_parallel(true).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	# Увеличиваем котика (было 1, 1, 1)
+	tw.tween_property(cat, "scale", Vector3(1.6, 1.6, 1.6), 0.6)
+
+	# 2. Магия проекции: Полет 2D-рюкзака к 3D-коту
+	if backpack_widget and backpack_widget.closing_sequence_node:
+		var pack = backpack_widget.closing_sequence_node
+		var cam = get_viewport().get_camera_3d()
+
+		if cam:
+			# Получаем 2D координаты кота на экране
+			var cat_screen_pos = cam.unproject_position(cat.global_position)
+
+			# ТОЧНЫЙ РАСЧЕТ: учитываем scale рюкзака для идеального центра
+			var target_pos = cat_screen_pos - ((pack.size * pack.scale) / 2.0)
+
+			# Рюкзак летит точно в котика
+			tw.tween_property(pack, "global_position", target_pos, 0.8).set_trans(Tween.TRANS_SINE)
+			tw.tween_property(pack, "scale", Vector2.ZERO, 0.8).set_trans(Tween.TRANS_SINE)
+			tw.tween_property(pack, "modulate:a", 0.0, 0.8).set_trans(Tween.TRANS_SINE)
+
+			tw.chain().tween_callback(func():
+				pack.queue_free()
+				backpack_widget.closing_sequence_node = null
+				backpack_widget.is_order_completed = false
+				print("--- УРОВЕНЬ ПОЛНОСТЬЮ ПРОЙДЕН ---")
+			)
+		else:
+			# Fallback, если камеры почему-то нет
+			pack.queue_free()
+			backpack_widget.closing_sequence_node = null
+			backpack_widget.is_order_completed = false

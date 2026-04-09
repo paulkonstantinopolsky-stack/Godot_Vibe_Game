@@ -525,3 +525,85 @@ func _on_bonus_coin_flight_finished() -> void:
 			angular_velocity = 0.0
 			all_rewards_collected_visually.emit()
 			all_bonus_coins_collected.emit()
+
+
+func prepare_for_courier() -> void:
+	# 1. Растворяем весь мусор и закрываем двери
+	for child in get_children():
+		if child.has_method("close_doors_magic"):
+			child.close_doors_magic()
+		for subchild in child.get_children():
+			if subchild.has_method("fade_out_magic"):
+				subchild.fade_out_magic()
+
+	# 2. Выравниваем шкаф идеально по ребру (сдвиг 22.5), чтобы 2 колонки были ровно спереди
+	_stop_snap()
+	if focus_tween and focus_tween.is_running(): focus_tween.kill()
+	var target_y = round((rotation_degrees.y - 22.5) / 45.0) * 45.0 + 22.5
+	var tw = create_tween().bind_node(self).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
+	tw.tween_property(self, "rotation_degrees:y", target_y, 0.5)
+	tw.tween_callback(func(): current_rotation_y = rotation_degrees.y)
+
+
+func open_courier_passage(callback: Callable) -> void:
+	var cam = get_viewport().get_camera_3d()
+	if cam == null:
+		callback.call()
+		return
+
+	var cells = []
+
+	# Собираем только ячейки (игнорируем крышки и партиклы)
+	for child in get_children():
+		if child.has_method("open_doors") or child.scene_file_path.contains("Cell"):
+			cells.append(child)
+
+	# Сортируем ячейки по близости к камере
+	cells.sort_custom(func(a, b):
+		return a.global_position.distance_to(cam.global_position) < b.global_position.distance_to(cam.global_position)
+	)
+
+	# Берем 20 ячеек (4 фронтальные колонки вместо 2)
+	var front_cells = cells.slice(0, 20)
+	var cam_right = global_position.direction_to(cam.global_position).cross(Vector3.UP).normalized()
+	var anim_tw = create_tween().bind_node(self).set_parallel(true).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_IN_OUT)
+
+	for cell in front_cells:
+		# Безопасная нормализация (оставляем наш недавний фикс)
+		var dir_out = (cell.position * Vector3(1, 0, 1))
+		if dir_out.length() < 0.001:
+			dir_out = Vector3.FORWARD
+		else:
+			dir_out = dir_out.normalized()
+
+		# Выталкиваем ячейки гораздо дальше вперед (на 1.1 метра вместо 0.5)
+		var pushed_out_pos = cell.position + (dir_out * 1.1)
+
+		# Фаза 1: Выдвигаем блоки ВПЕРЕД
+		anim_tw.tween_property(cell, "position", pushed_out_pos, 0.4)
+		anim_tw.tween_property(cell, "scale", cell.scale * 1.05, 0.4)
+
+		# Фаза 2: Разъезд в стороны. Определяем, левая это сторона или правая.
+		var dot_val = (cell.global_position - global_position).dot(cam_right)
+		var is_right = dot_val > 0
+
+		# Определяем, центральная это колонка (dot ~0.7) или боковая (dot ~1.7)
+		var is_outer_column = abs(dot_val) > 1.2
+
+		var slide_angle = 0.0
+		if is_outer_column:
+			# Внешние створки распахиваются очень широко
+			slide_angle = deg_to_rad(-95.0) if is_right else deg_to_rad(95.0)
+		else:
+			# Внутренние створки уходят за ними
+			slide_angle = deg_to_rad(-65.0) if is_right else deg_to_rad(65.0)
+
+		# Поворачиваем вокруг оси шкафа
+		var final_pos = pushed_out_pos.rotated(Vector3.UP, slide_angle)
+		var final_rot = cell.rotation
+		final_rot.y += slide_angle
+
+		anim_tw.tween_property(cell, "position", final_pos, 0.8).set_delay(0.4)
+		anim_tw.tween_property(cell, "rotation", final_rot, 0.8).set_delay(0.4)
+
+	anim_tw.chain().tween_callback(callback)
