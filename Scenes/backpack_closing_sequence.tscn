@@ -17,6 +17,7 @@ grow_vertical = 2
 size_flags_horizontal = 4
 size_flags_vertical = 4
 script = ExtResource("1_whixg")
+drag_sensitivity = 800.0
 strap_visual_distance = 750.0
 
 [node name="FrameDisplay" type="TextureRect" parent="." unique_id=1452396379]

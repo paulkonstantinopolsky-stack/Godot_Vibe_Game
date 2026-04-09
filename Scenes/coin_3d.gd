@@ -72,6 +72,7 @@ func collect_coin():
 	tw.parallel().tween_property(self, "global_position:y", final_out_pos.y + up_distance, 1.2)
 	tw.parallel().tween_property(self, "rotation_degrees:y", rotation_degrees.y + spin_degrees, 1.2).set_ease(Tween.EASE_IN_OUT)
 
+	# Вызываем окончание полета и удаляем монетку СТРОГО в конце анимации
 	tw.tween_callback(func():
 		if cabinet_node and is_instance_valid(cabinet_node) and cabinet_node.has_method("_on_bonus_coin_flight_finished"):
 			cabinet_node._on_bonus_coin_flight_finished()

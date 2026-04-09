@@ -151,16 +151,16 @@ func mark_item_as_found(id: int) -> bool:
 
 func unmark_item_as_found(id: int) -> void:
 	for item in current_order:
-		if item["id"] == id:
-			if item["found"]:
-				item["found"] = false
+		# Ищем только тот предмет, который сейчас числится найденным!
+		if item["id"] == id and item["found"]:
+			item["found"] = false
 
-				# Откатываем счетчик только если комбо еще живо
-				if not combo_failed:
-					combo_score = maxi(0, combo_score - 1)
+			# Откатываем счетчик только если комбо еще живо
+			if not combo_failed:
+				combo_score = maxi(0, combo_score - 1)
 
-				item_unfound.emit(id)
-			return
+			item_unfound.emit(id)
+			return # Выходим только после успешной отмены
 
 func generate_new_order():
 	current_order.clear()

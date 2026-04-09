@@ -352,7 +352,8 @@ func reveal_next_bonus_cell(callback: Callable):
 	var data = active_red_cells.pop_front()
 	var cell = data["cell"]
 	var col: int = data["col"]
-	
+	var is_last_bonus = active_red_cells.is_empty()
+
 	_stop_snap()
 	# Убиваем focus tween — иначе он будет конфликтовать с поворотом кинематики
 	if focus_tween and focus_tween.is_running():
@@ -400,6 +401,18 @@ func reveal_next_bonus_cell(callback: Callable):
 			_register_coin_col(col)
 			if cell.has_method("open_doors"):
 				cell.open_doors()
+
+		# --- ЗАПУСК ФИНАЛА (ПРЫЖОК РЮКЗАКА) ---
+		if is_last_bonus:
+			get_tree().create_timer(1.2).timeout.connect(func():
+				if is_instance_valid(self) and not is_level_finished:
+					is_level_finished = true
+					can_rotate = false
+					angular_velocity = 0.0
+					all_rewards_collected_visually.emit()
+					all_bonus_coins_collected.emit()
+			)
+		# --------------------------------------
 
 		get_tree().create_timer(post_open_delay).timeout.connect(func():
 			can_rotate = true
@@ -506,7 +519,7 @@ func _on_bonus_coin_flight_finished() -> void:
 	_coins_in_flight = maxi(_coins_in_flight - 1, 0)
 
 	if _coins_in_flight == 0 and unlocked_coin_cols.is_empty() and active_red_cells.is_empty():
-		if is_instance_valid(self):
+		if is_instance_valid(self) and not is_level_finished:
 			is_level_finished = true
 			can_rotate = false
 			angular_velocity = 0.0

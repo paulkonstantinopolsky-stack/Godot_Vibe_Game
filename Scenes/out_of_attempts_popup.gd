@@ -28,10 +28,12 @@ func _ready() -> void:
 		content_box.scale = Vector2(0.95, 0.95)
 		content_box.modulate.a = 0.0
 	btn_close.modulate.a = 0.0
-	btn_autofill.modulate.a = 0.0
+	if btn_autofill:
+		btn_autofill.modulate.a = 0.0
 
 	if btn_close: btn_close.pressed.connect(_on_close_pressed)
-	if btn_autofill: btn_autofill.pressed.connect(_on_autofill_pressed)
+	if btn_autofill:
+		btn_autofill.pressed.connect(func(): _close_popup("autofill"))
 
 	# --- ФИКС ПЕРЕХВАТА КЛИКОВ ---
 	# Делаем контейнер, текст и иконку "прозрачными" для мыши,

@@ -136,6 +136,24 @@ func _on_perfect_clear() -> void:
 	if is_autofill_animating:
 		await autofill_finished
 
+	# --- ПЛАВНОЕ СКРЫТИЕ ЛИШНИХ ВИДЖЕТОВ ---
+	var hide_tw = create_tween().bind_node(self).set_parallel(true).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+	if side_widget: 
+		hide_tw.tween_property(side_widget, "modulate:a", 0.0, 0.3)
+	if attempts_widget: 
+		hide_tw.tween_property(attempts_widget, "modulate:a", 0.0, 0.3)
+	if autofill_button: 
+		hide_tw.tween_property(autofill_button, "modulate:a", 0.0, 0.3)
+		
+	hide_tw.chain().tween_callback(func():
+		if side_widget: side_widget.hide()
+		if attempts_widget: attempts_widget.hide()
+		if autofill_button: autofill_button.hide()
+	)
+	# ---------------------------------------
+
+	await hide_tw.finished
+
 	var popup: Control = load("res://Scenes/perfect_popup.gd").new() as Control
 	popup.z_index = 400
 	$UILayer.add_child(popup)

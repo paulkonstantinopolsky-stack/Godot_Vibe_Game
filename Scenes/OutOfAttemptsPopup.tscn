@@ -4,18 +4,18 @@
 [ext_resource type="Texture2D" uid="uid://dy6pyglh5ktw3" path="res://Assets/2D/ADS_Paper.png" id="2_gp4vr"]
 [ext_resource type="Texture2D" uid="uid://c88waunemtx3v" path="res://Assets/2D/Decor_Title.png" id="4_cpj0r"]
 [ext_resource type="Texture2D" uid="uid://bw0d1xe8gxfic" path="res://Assets/2D/BtnCancel.png" id="5_xq6wn"]
+[ext_resource type="Texture2D" uid="uid://ykv7lx6q61kv" path="res://Assets/2D/Start_Button.png" id="6_k44ad"]
 [ext_resource type="FontFile" uid="uid://crl2jbvqyt7jm" path="res://Fonts/Comfortaa-Bold.ttf" id="6_mo6a8"]
-[ext_resource type="Texture2D" uid="uid://dbmg37quxqu5j" path="res://Assets/2D/ADS_Button.png" id="7_pm81s"]
-[ext_resource type="Texture2D" uid="uid://b2wwgfk4vr0u4" path="res://Assets/2D/ADS_Icon.png" id="8_714w0"]
+[ext_resource type="Texture2D" uid="uid://dx8cho3u0k5o2" path="res://Assets/2D/Start_Button_Pressed.png" id="7_ceblv"]
 
-[sub_resource type="StyleBoxTexture" id="StyleBoxTexture_d56os"]
-texture = ExtResource("7_pm81s")
+[sub_resource type="StyleBoxTexture" id="StyleBoxTexture_gp4vr"]
+texture = ExtResource("6_k44ad")
 
-[sub_resource type="StyleBoxTexture" id="StyleBoxTexture_ox2f7"]
-texture = ExtResource("7_pm81s")
+[sub_resource type="StyleBoxTexture" id="StyleBoxTexture_k44ad"]
+texture = ExtResource("7_ceblv")
 
-[sub_resource type="StyleBoxTexture" id="StyleBoxTexture_2ug8y"]
-texture = ExtResource("7_pm81s")
+[sub_resource type="StyleBoxTexture" id="StyleBoxTexture_cpj0r"]
+texture = ExtResource("6_k44ad")
 
 [node name="OutOfAttemptsPopup" type="Control" unique_id=1459985145]
 layout_mode = 3
@@ -135,62 +135,31 @@ offset_right = 505.0
 offset_bottom = -683.0
 grow_horizontal = 2
 grow_vertical = 2
+focus_mode = 0
 texture_normal = ExtResource("5_xq6wn")
 texture_pressed = ExtResource("5_xq6wn")
 texture_hover = ExtResource("5_xq6wn")
 ignore_texture_size = true
 stretch_mode = 0
 
-[node name="BtnAutofill" type="Button" parent="ContentBox" unique_id=2049651593]
-unique_name_in_owner = true
-modulate = Color(1, 1, 1, 0)
-custom_minimum_size = Vector2(588, 164)
+[node name="BtnAutofill" type="Button" parent="ContentBox" unique_id=693087172]
 layout_mode = 1
 anchors_preset = 8
 anchor_left = 0.5
 anchor_top = 0.5
 anchor_right = 0.5
 anchor_bottom = 0.5
-offset_left = -294.0
-offset_top = 503.0
-offset_right = 294.0
-offset_bottom = 671.9999
+offset_left = -234.0
+offset_top = 527.0
+offset_right = 234.0
+offset_bottom = 696.0
 grow_horizontal = 2
 grow_vertical = 2
 pivot_offset = Vector2(233, 91)
-theme_override_colors/font_color = Color(1, 0.9647059, 0.92156863, 1)
+focus_mode = 0
 theme_override_fonts/font = ExtResource("6_mo6a8")
 theme_override_font_sizes/font_size = 54
-theme_override_styles/normal = SubResource("StyleBoxTexture_d56os")
-theme_override_styles/pressed = SubResource("StyleBoxTexture_ox2f7")
-theme_override_styles/hover = SubResource("StyleBoxTexture_2ug8y")
-
-[node name="HBoxContainer" type="HBoxContainer" parent="ContentBox/BtnAutofill" unique_id=612937231]
-layout_mode = 1
-anchors_preset = 8
-anchor_left = 0.5
-anchor_top = 0.5
-anchor_right = 0.5
-anchor_bottom = 0.5
-offset_left = -477.0
-offset_top = -51.5
-offset_right = 477.0
-offset_bottom = 51.5
-grow_horizontal = 2
-grow_vertical = 2
-theme_override_constants/separation = 30
-alignment = 1
-
-[node name="Icon" type="TextureRect" parent="ContentBox/BtnAutofill/HBoxContainer" unique_id=1360527291]
-custom_minimum_size = Vector2(102, 74)
-layout_mode = 2
-texture = ExtResource("8_714w0")
-expand_mode = 1
-stretch_mode = 3
-
-[node name="TitleLabel" type="Label" parent="ContentBox/BtnAutofill/HBoxContainer" unique_id=686053403]
-layout_mode = 2
-theme_override_colors/font_color = Color(1, 1, 1, 1)
-theme_override_font_sizes/font_size = 72
-text = "Watch"
-horizontal_alignment = 1
+theme_override_styles/normal = SubResource("StyleBoxTexture_gp4vr")
+theme_override_styles/pressed = SubResource("StyleBoxTexture_k44ad")
+theme_override_styles/hover = SubResource("StyleBoxTexture_cpj0r")
+text = "WATCH AD"
