@@ -566,50 +566,67 @@ func fly_back_to_cabinet(item_id: int, start_pos: Vector2, drag_node: Node3D, sk
 func _on_level_completed() -> void:
 	is_game_started = false # Блокируем логику игры
 	if cabinet:
-		# 1. Готовим шкаф
 		cabinet.prepare_for_courier()
 
-		# 2. Через 0.6с открываем проход
 		var tw = create_tween().bind_node(self)
 		tw.tween_interval(0.6)
 		tw.tween_callback(func():
-			cabinet.open_courier_passage(_on_courier_spawned)
+			_spawn_courier_cat() # Спавним кота ОДНОВРЕМЕННО с началом движения стен
+			cabinet.open_courier_passage(_fly_backpack_to_cat)
 		)
 
 
-func _on_courier_spawned() -> void:
-	# 1. Спавним котика внутри шкафа
+func _spawn_courier_cat() -> void:
 	var cat = Sprite3D.new()
+	cat.name = "CourierCat" # Задаем имя, чтобы рюкзак мог его найти
 	cat.texture = load("res://Assets/2D/cat_courier.png")
 	cat.pixel_size = 0.004
 	cat.billboard = BaseMaterial3D.BILLBOARD_FIXED_Y
 	cat.alpha_cut = SpriteBase3D.ALPHA_CUT_DISCARD
+
 	if cabinet:
 		cabinet.add_child(cat)
-		# Поднимаем котика на 0.8 метра вверх, чтобы он стоял в центре прохода
-		cat.global_position = cabinet.global_position + Vector3(0, 0.8, 0)
-		cat.scale = Vector3.ZERO
 
-	var tw = create_tween().bind_node(self).set_parallel(true).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
-	# Увеличиваем котика (было 1, 1, 1)
-	tw.tween_property(cat, "scale", Vector3(1.6, 1.6, 1.6), 0.6)
+		var cam = get_viewport().get_camera_3d()
+		var dir_to_cam = Vector3(0, 0, 1)
+		if cam:
+			dir_to_cam = cabinet.global_position.direction_to(cam.global_position)
+			dir_to_cam.y = 0
+			dir_to_cam = dir_to_cam.normalized()
 
-	# 2. Магия проекции: Полет 2D-рюкзака к 3D-коту
+		# Выдвигаем кота ближе к камере (1.35 вместо 0.95)
+		cat.global_position = cabinet.global_position + Vector3(0, 2.25, 0) + (dir_to_cam * 1.35)
+
+		# Сразу ставим финальный размер
+		cat.scale = Vector3(2.1, 2.1, 2.1)
+		cat.modulate.a = 0.0 # Делаем прозрачным для фейда
+
+		# Быстрый и легкий фейд-ин
+		var tw = create_tween().bind_node(self)
+		tw.tween_property(cat, "modulate:a", 1.0, 0.4).set_trans(Tween.TRANS_SINE)
+
+
+func _fly_backpack_to_cat() -> void:
+	var cat = cabinet.get_node_or_null("CourierCat") if cabinet else null
+	if not cat: return
+
 	if backpack_widget and backpack_widget.closing_sequence_node:
 		var pack = backpack_widget.closing_sequence_node
 		var cam = get_viewport().get_camera_3d()
 
 		if cam:
-			# Получаем 2D координаты кота на экране
-			var cat_screen_pos = cam.unproject_position(cat.global_position)
+			# Смещаем цель в 3D чуть выше базы кота (целимся в пузико/грудь, а не в ноги)
+			var cat_center_3d = cat.global_position + Vector3(0, 0.8, 0)
+			var cat_screen_pos = cam.unproject_position(cat_center_3d)
 
-			# ТОЧНЫЙ РАСЧЕТ: учитываем scale рюкзака для идеального центра
-			var target_pos = cat_screen_pos - ((pack.size * pack.scale) / 2.0)
+			# Устанавливаем якорь UI точно в центр рюкзака, чтобы он сжимался симметрично
+			pack.pivot_offset = pack.size / 2.0
+			var target_pos = cat_screen_pos - pack.pivot_offset
 
-			# Рюкзак летит точно в котика
-			tw.tween_property(pack, "global_position", target_pos, 0.8).set_trans(Tween.TRANS_SINE)
-			tw.tween_property(pack, "scale", Vector2.ZERO, 0.8).set_trans(Tween.TRANS_SINE)
-			tw.tween_property(pack, "modulate:a", 0.0, 0.8).set_trans(Tween.TRANS_SINE)
+			var tw = create_tween().bind_node(self).set_parallel(true).set_trans(Tween.TRANS_SINE)
+			tw.tween_property(pack, "global_position", target_pos, 0.8)
+			tw.tween_property(pack, "scale", Vector2.ZERO, 0.8)
+			tw.tween_property(pack, "modulate:a", 0.0, 0.8)
 
 			tw.chain().tween_callback(func():
 				pack.queue_free()
@@ -618,7 +635,6 @@ func _on_courier_spawned() -> void:
 				print("--- УРОВЕНЬ ПОЛНОСТЬЮ ПРОЙДЕН ---")
 			)
 		else:
-			# Fallback, если камеры почему-то нет
 			pack.queue_free()
 			backpack_widget.closing_sequence_node = null
 			backpack_widget.is_order_completed = false

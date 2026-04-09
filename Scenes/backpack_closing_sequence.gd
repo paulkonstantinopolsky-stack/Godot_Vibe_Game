@@ -45,6 +45,7 @@ var is_sealed: bool = false
 var glint_mat: ShaderMaterial
 var float_tw: Tween
 var frame_base_pos: Vector2
+var _packing_final_emitted: bool = false
 
 func _ready():
 	current_frame_index = 0
@@ -68,15 +69,12 @@ func _ready():
 		)
 		delay_tw.tween_property(affordance_ui, "modulate:a", 1.0, 0.4)
 
-	# --- ИНИЦИАЛИЗАЦИЯ ШЕЙДЕРА И КЛИКА ПОБЕДЫ ---
+	# --- ИНИЦИАЛИЗАЦИЯ ШЕЙДЕРА (финал — автоматически после анимации победы) ---
 	glint_mat = ShaderMaterial.new()
 	glint_mat.shader = load("res://Shaders/glint.gdshader")
 	glint_mat.set_shader_parameter("progress", -0.1)
 	if frame_display:
 		frame_display.material = glint_mat
-
-	gui_input.connect(_on_victory_click)
-	# --------------------------------------------
 
 	_update_frame()
 	drag_handle.gui_input.connect(_on_handle_input)
@@ -227,7 +225,10 @@ func _enter_victory_state():
 			0.0, 1.0, 0.6
 		).set_trans(Tween.TRANS_SINE).set_delay(0.1)
 
-		tw.chain().tween_callback(_start_victory_float)
+		tw.chain().tween_callback(func():
+			_start_victory_float()
+			_emit_packing_final_once()
+		)
 
 
 func _start_victory_float():
@@ -240,12 +241,8 @@ func _start_victory_float():
 	float_tw.tween_property(frame_display, "position:y", frame_base_pos.y, 1.5).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
 
 
-func _on_victory_click(event):
-	if is_sealed:
-		# not event.pressed означает, что игрок отпустил ЛКМ или убрал палец с экрана
-		var is_mouse_release = event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and not event.pressed
-		var is_touch_release = event is InputEventScreenTouch and not event.pressed
-
-		if is_mouse_release or is_touch_release:
-			if float_tw and float_tw.is_valid(): float_tw.kill()
-			emit_signal("packing_completed")
+func _emit_packing_final_once() -> void:
+	if _packing_final_emitted:
+		return
+	_packing_final_emitted = true
+	emit_signal("packing_completed")

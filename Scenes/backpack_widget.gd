@@ -864,7 +864,9 @@ func hide_external_drag_preview() -> void:
 # --- ОСТАЛЬНАЯ ЛОГИКА ---
 # ==========================================================
 func _input(event):
-	if is_order_completed: return
+	# Завершение заказа не через клик по виджету: closing_sequence шлёт packing_completed после свайпа ремешка.
+	if is_order_completed:
+		return
 	var mouse_pos = get_global_mouse_position()
 	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
 		if event.pressed:

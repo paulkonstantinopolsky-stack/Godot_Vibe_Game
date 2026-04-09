@@ -566,44 +566,66 @@ func open_courier_passage(callback: Callable) -> void:
 	# Берем 20 ячеек (4 фронтальные колонки вместо 2)
 	var front_cells = cells.slice(0, 20)
 	var cam_right = global_position.direction_to(cam.global_position).cross(Vector3.UP).normalized()
-	var anim_tw = create_tween().bind_node(self).set_parallel(true).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_IN_OUT)
+	var anim_tw = create_tween().bind_node(self).set_parallel(true)
 
-	for cell in front_cells:
-		# Безопасная нормализация (оставляем наш недавний фикс)
+	for i in range(front_cells.size()):
+		var cell = front_cells[i]
+
+		# Сначала определяем сторону для асимметрии
+		var dot_val = (cell.global_position - global_position).dot(cam_right)
+		var is_right = dot_val > 0
+
+		# Ускорили каскад в 1.5 раза
+		var side_multiplier = 0.11 if is_right else 0.05 # (0.16/1.5 и 0.08/1.5)
+		var organic_offset = randf_range(0.0, 0.37) # (0.55/1.5)
+		var cascade_delay = (i * side_multiplier) + organic_offset
+
+		var orig_rot = cell.rotation
+
 		var dir_out = (cell.position * Vector3(1, 0, 1))
 		if dir_out.length() < 0.001:
 			dir_out = Vector3.FORWARD
 		else:
 			dir_out = dir_out.normalized()
 
-		# Выталкиваем ячейки гораздо дальше вперед (на 1.1 метра вместо 0.5)
-		var pushed_out_pos = cell.position + (dir_out * 1.1)
+		# Оставляем только движение строго вперед без расталкивания
+		var pushed_out_pos = cell.position + (dir_out * 1.15)
 
-		# Фаза 1: Выдвигаем блоки ВПЕРЕД
-		anim_tw.tween_property(cell, "position", pushed_out_pos, 0.4)
-		anim_tw.tween_property(cell, "scale", cell.scale * 1.05, 0.4)
+		# Ускоряем финальный разъезд и мердж
+		var t_phase1 = 0.23
+		var t_hang = 0.65
+		var t_phase2 = 0.25 # Было 0.40. Делаем влет в стену еще стремительнее!
 
-		# Фаза 2: Разъезд в стороны. Определяем, левая это сторона или правая.
-		var dot_val = (cell.global_position - global_position).dot(cam_right)
-		var is_right = dot_val > 0
+		var delay1 = cascade_delay
+		var delay2 = t_phase1 + t_hang + cascade_delay
+		var total_duration = t_phase1 + t_hang + t_phase2
 
-		# Определяем, центральная это колонка (dot ~0.7) или боковая (dot ~1.7)
+		# Переносим расчет углов разъезда (slide_angle) ВЫШЕ, чтобы использовать для финального вращения
 		var is_outer_column = abs(dot_val) > 1.2
-
 		var slide_angle = 0.0
 		if is_outer_column:
-			# Внешние створки распахиваются очень широко
 			slide_angle = deg_to_rad(-95.0) if is_right else deg_to_rad(95.0)
 		else:
-			# Внутренние створки уходят за ними
 			slide_angle = deg_to_rad(-65.0) if is_right else deg_to_rad(65.0)
 
-		# Поворачиваем вокруг оси шкафа
-		var final_pos = pushed_out_pos.rotated(Vector3.UP, slide_angle)
-		var final_rot = cell.rotation
-		final_rot.y += slide_angle
+		# --- ФАЗА 1: МГНОВЕННЫЙ ВЗРЫВ НАРУЖУ ---
+		anim_tw.tween_property(cell, "position", pushed_out_pos, t_phase1)\
+			.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)\
+			.set_delay(delay1)
 
-		anim_tw.tween_property(cell, "position", final_pos, 0.8).set_delay(0.4)
-		anim_tw.tween_property(cell, "rotation", final_rot, 0.8).set_delay(0.4)
+		# --- ВРАЩЕНИЕ НА УГОЛ РАЗЪЕЗДА (Сквозное) ---
+		var final_rot_y = orig_rot.y + slide_angle
+
+		# Один хлесткий поворот на нужный угол с захлестом в конце
+		anim_tw.tween_property(cell, "rotation:y", final_rot_y, total_duration)\
+			.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)\
+			.set_delay(delay1)
+
+		# --- ФАЗА 2: РАЗЪЕЗД В СТОРОНЫ И МЕРДЖ ---
+		var final_pos = (cell.position * 0.95).rotated(Vector3.UP, slide_angle)
+
+		anim_tw.tween_property(cell, "position", final_pos, t_phase2)\
+			.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_IN_OUT)\
+			.set_delay(delay2)
 
 	anim_tw.chain().tween_callback(callback)
