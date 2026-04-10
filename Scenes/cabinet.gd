@@ -81,6 +81,7 @@ signal all_rewards_collected_visually
 
 var _coins_in_flight: int = 0
 var is_level_finished: bool = false
+var is_interactable: bool = true
 
 func set_bonus_reveal_speed_multiplier(mult: float) -> void:
 	bonus_reveal_speed_multiplier = max(mult, 0.01)
@@ -93,6 +94,27 @@ func set_bonus_fixed_post_open_delay(seconds: float) -> void:
 
 func _ready() -> void:
 	hide()
+
+func _set_ray_pickable_recursive(node: Node, state: bool) -> void:
+	if node is CollisionObject3D:
+		(node as CollisionObject3D).input_ray_pickable = state
+	for child in node.get_children():
+		_set_ray_pickable_recursive(child, state)
+
+func disable_interaction() -> void:
+	is_interactable = false
+	can_rotate = false
+	is_dragging = false
+	angular_velocity = 0.0
+	if has_method("_stop_snap"):
+		_stop_snap()
+	# Ядерная опция: отключаем клики у вообще всех объектов внутри шкафа.
+	_set_ray_pickable_recursive(self, false)
+
+func enable_interaction() -> void:
+	is_interactable = true
+	# Возвращаем кликабельность всем объектам.
+	_set_ray_pickable_recursive(self, true)
 
 func _process(delta: float) -> void:
 	if is_level_finished:
@@ -120,6 +142,8 @@ func _process(delta: float) -> void:
 			_begin_snap_to_face(target_y)
 
 func _input(event: InputEvent) -> void:
+	if not is_interactable:
+		return
 	if is_level_finished:
 		return
 	if not can_rotate:
@@ -156,6 +180,8 @@ func _input(event: InputEvent) -> void:
 		_apply_direct_rotation(event.relative.x)
 
 func _on_rotate_grab() -> void:
+	if not is_interactable:
+		return
 	if is_level_finished:
 		return
 	is_dragging = true
@@ -164,6 +190,8 @@ func _on_rotate_grab() -> void:
 	current_rotation_y = rotation_degrees.y
 
 func _apply_direct_rotation(rel_x: float) -> void:
+	if not is_interactable:
+		return
 	if is_level_finished:
 		return
 	var delta_rot: float = rel_x * swipe_sensitivity
@@ -245,6 +273,7 @@ func focus_item_face_to_camera(item_node: Node3D, duration: float = 0.35, force:
 	focus_tween.finished.connect(func(): current_rotation_y = rotation_degrees.y)
 
 func build_cabinet_tornado() -> void:
+	enable_interaction()
 	is_level_finished = false
 	for child in get_children():
 		child.hide() # Спрятать перед удалением

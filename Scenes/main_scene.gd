@@ -114,6 +114,12 @@ func _on_item_unfound(id: int):
 		entry.set_meta("is_flipped", false)
 
 func _trigger_backpack_jump() -> void:
+	if cabinet:
+		if cabinet.has_method("disable_interaction"):
+			cabinet.disable_interaction()
+		else:
+			cabinet.is_interactable = false
+
 	# Прячем UI перед финальным прыжком
 	if side_widget: side_widget.hide()
 	if attempts_widget: attempts_widget.hide()

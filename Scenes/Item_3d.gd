@@ -15,7 +15,17 @@ func _ready():
 	if has_node("Area3D"):
 		$Area3D.input_event.connect(_on_area_3d_input_event)
 
+func _is_cabinet_locked() -> bool:
+	var node: Node = self
+	while node != null:
+		if node.has_method("disable_interaction") and node.has_method("enable_interaction"):
+			return not bool(node.get("is_interactable"))
+		node = node.get_parent()
+	return false
+
 func _on_area_3d_input_event(_camera, event, _position, _normal, _shape_idx):
+	if _is_cabinet_locked():
+		return
 	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
 		if event.pressed:
 			# Передаем ссылку на себя (self)
